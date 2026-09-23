@@ -1,8 +1,8 @@
 # Screening Desk — AI Resume Screener
 
-Paste a job description and a candidate resume; get back a structured screening
-report: a match score, the evidence for and against the candidate, and interview
-questions aimed at the gaps.
+Link a job posting or paste the description, add a candidate resume, and get
+back a structured screening report: a match score, the evidence for and against
+the candidate, and interview questions aimed at the gaps.
 
 Built with Next.js (App Router), TypeScript and Tailwind, deployed on Vercel.
 The model runs behind an OpenAI-compatible gateway, called only from the server
@@ -10,19 +10,19 @@ so the API key never reaches the browser.
 
 ## How it works
 
-0. **Link the job posting (or paste it).** `POST /api/fetch-job` fetches the
+1. **Link the job posting (or paste it).** `POST /api/fetch-job` fetches the
    page server-side and reduces it to readable text, preferring the `<main>`
    or `<article>` region and stripping navigation. The text lands in an
    editable box, so a page that pulls in extra boilerplate can be trimmed
    before screening.
-1. **Upload or paste a resume.** `POST /api/extract` turns a PDF, DOCX or TXT
+2. **Upload or paste a resume.** `POST /api/extract` turns a PDF, DOCX or TXT
    file into plain text ([unpdf](https://github.com/unjs/unpdf) and
    [mammoth](https://github.com/mwilliamson/mammoth.js)). The text lands in an
    editable box so the extraction can be checked before it's sent.
-2. **Screen the candidate.** `POST /api/analyze` builds an injection-resistant
+3. **Screen the candidate.** `POST /api/analyze` builds an injection-resistant
    prompt — resume and job description are delimited and explicitly marked as
    data, not instructions — and asks the model for a JSON report.
-3. **Validate before rendering.** The response is parsed against a
+4. **Validate before rendering.** The response is parsed against a
    [zod](https://zod.dev) schema. The same schema is embedded in the prompt as
    JSON Schema, so what the model is asked for and what the UI accepts can't
    drift apart. A failed response is reported, never half-rendered.
@@ -85,7 +85,7 @@ npm run dev                  # http://localhost:3000
 
 ```
 app/
-  page.tsx              Landing page and masthead
+  page.tsx                Landing page and masthead
   api/analyze/route.ts    Screening endpoint (server-only, holds the key)
   api/extract/route.ts    File → text endpoint
   api/fetch-job/route.ts  Job posting URL → text endpoint
