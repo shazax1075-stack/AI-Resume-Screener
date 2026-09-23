@@ -8,19 +8,63 @@ import type { ScreeningReport } from "@/lib/schema";
 
 const ACCEPTED = ".txt,.pdf,.docx";
 
+/** Shows where fetched text came from, e.g. "boards.greenhouse.io". */
+function hostOf(url: string): string {
+  try {
+    return new URL(/^https?:\/\//i.test(url) ? url : `https://${url}`).hostname.replace(
+      /^www\./,
+      "",
+    );
+  } catch {
+    return url;
+  }
+}
+
 export function Screener() {
   const [jobDescription, setJobDescription] = useState("");
+  const [jobUrl, setJobUrl] = useState("");
+  const [jobSource, setJobSource] = useState<string | null>(null);
+  const [fetchingJob, setFetchingJob] = useState(false);
   const [resumeText, setResumeText] = useState("");
   const [fileName, setFileName] = useState<string | null>(null);
   const [extracting, setExtracting] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<{ label: string; message: string } | null>(null);
   const [report, setReport] = useState<ScreeningReport | null>(null);
   const [dragging, setDragging] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
   const reportAnchor = useRef<HTMLDivElement>(null);
 
   const ready = jobDescription.trim().length > 0 && resumeText.trim().length > 0;
+
+  async function fetchJobUrl() {
+    if (!jobUrl.trim() || fetchingJob) return;
+    setError(null);
+    setFetchingJob(true);
+    try {
+      const response = await fetch("/api/fetch-job", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: jobUrl }),
+      });
+      const data = (await response.json()) as { text?: string; error?: string };
+      if (!response.ok || !data.text) {
+        setJobSource(null);
+        setError({ label: "Link not read", message: data.error ?? "Couldn't read that link." });
+        return;
+      }
+      setJobDescription(data.text);
+      setJobSource(hostOf(jobUrl));
+    } catch {
+      setJobSource(null);
+      setError({
+        label: "Link not read",
+        message: "Couldn't reach that link. Check your connection, or paste the description.",
+      });
+    } finally {
+      setFetchingJob(false);
+    }
+  }
 
   async function handleFile(file: File) {
     setError(null);
@@ -33,13 +77,16 @@ export function Screener() {
       const data = (await response.json()) as { text?: string; error?: string };
       if (!response.ok || !data.text) {
         setFileName(null);
-        setError(data.error ?? "Could not read that file.");
+        setError({ label: "File not read", message: data.error ?? "Could not read that file." });
         return;
       }
       setResumeText(data.text);
     } catch {
       setFileName(null);
-      setError("Could not upload that file. Check your connection and try again.");
+      setError({
+        label: "File not read",
+        message: "Could not upload that file. Check your connection and try again.",
+      });
     } finally {
       setExtracting(false);
     }
@@ -56,6 +103,8 @@ export function Screener() {
     setJobDescription(SAMPLE_JOB_DESCRIPTION);
     setResumeText(SAMPLE_RESUME);
     setFileName(null);
+    setJobUrl("");
+    setJobSource(null);
     setError(null);
   }
 
@@ -63,6 +112,8 @@ export function Screener() {
     setJobDescription("");
     setResumeText("");
     setFileName(null);
+    setJobUrl("");
+    setJobSource(null);
     setError(null);
     setReport(null);
   }
@@ -82,7 +133,10 @@ export function Screener() {
         error?: string;
       };
       if (!response.ok || !data.report) {
-        setError(data.error ?? "The analysis failed. Please try again.");
+        setError({
+          label: "Analysis failed",
+          message: data.error ?? "The analysis failed. Please try again.",
+        });
         return;
       }
       setReport(data.report);
@@ -90,7 +144,10 @@ export function Screener() {
         reportAnchor.current?.scrollIntoView({ behavior: "smooth", block: "start" }),
       );
     } catch {
-      setError("Could not reach the server. Check your connection and try again.");
+      setError({
+        label: "Analysis failed",
+        message: "Could not reach the server. Check your connection and try again.",
+      });
     } finally {
       setAnalyzing(false);
     }
@@ -106,15 +163,49 @@ export function Screener() {
               01 / Job description
             </label>
             <span className="label tabular-nums">
+              {jobSource && <span className="text-oxblood-soft">{jobSource} · </span>}
               {jobDescription.length ? `${jobDescription.length} chars` : ""}
             </span>
           </div>
+          <div className="mb-3 flex items-center gap-2 border border-dashed border-rule px-3 py-2.5">
+            <label htmlFor="job-url" className="sr-only">
+              Job posting URL
+            </label>
+            <input
+              id="job-url"
+              type="url"
+              inputMode="url"
+              value={jobUrl}
+              onChange={(event) => setJobUrl(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  void fetchJobUrl();
+                }
+              }}
+              placeholder="Paste a link to the posting…"
+              className="min-w-0 flex-1 bg-transparent text-sm text-ink outline-none placeholder:text-ink-faint"
+              spellCheck={false}
+            />
+            <button
+              type="button"
+              onClick={() => void fetchJobUrl()}
+              disabled={!jobUrl.trim() || fetchingJob}
+              className="shrink-0 cursor-pointer border border-ink/25 px-3 py-1.5 font-mono text-[0.6875rem] tracking-[0.14em] uppercase transition-colors hover:border-ink hover:bg-ink hover:text-paper disabled:cursor-not-allowed disabled:border-rule disabled:text-ink-faint disabled:hover:bg-transparent"
+            >
+              {fetchingJob ? "Reading…" : "Fetch"}
+            </button>
+          </div>
+
           <textarea
             id="job-description"
             value={jobDescription}
-            onChange={(event) => setJobDescription(event.target.value)}
-            placeholder="Paste the full job description — responsibilities, requirements, nice-to-haves…"
-            className="field h-80 w-full resize-y p-4 text-[0.9375rem] leading-relaxed"
+            onChange={(event) => {
+              setJobDescription(event.target.value);
+              if (jobSource) setJobSource(null);
+            }}
+            placeholder="…or paste the full job description here — responsibilities, requirements, nice-to-haves."
+            className="field h-[15.5rem] w-full resize-y p-4 text-[0.9375rem] leading-relaxed"
             spellCheck={false}
           />
         </div>
@@ -193,7 +284,7 @@ export function Screener() {
         <button
           type="button"
           onClick={() => void analyze()}
-          disabled={!ready || analyzing || extracting}
+          disabled={!ready || analyzing || extracting || fetchingJob}
           className="group relative cursor-pointer bg-ink px-8 py-3.5 font-display text-lg font-semibold tracking-tight text-paper transition-all hover:bg-oxblood disabled:cursor-not-allowed disabled:bg-ink/25"
         >
           {analyzing ? "Screening…" : "Screen candidate"}
@@ -245,8 +336,8 @@ export function Screener() {
           role="alert"
           className="animate-rise mt-8 border-l-2 border-oxblood bg-oxblood/5 px-5 py-4"
         >
-          <span className="label text-oxblood">Analysis failed</span>
-          <p className="mt-1.5 text-sm leading-relaxed text-ink-soft">{error}</p>
+          <span className="label text-oxblood">{error.label}</span>
+          <p className="mt-1.5 text-sm leading-relaxed text-ink-soft">{error.message}</p>
         </div>
       )}
 

@@ -10,6 +10,11 @@ so the API key never reaches the browser.
 
 ## How it works
 
+0. **Link the job posting (or paste it).** `POST /api/fetch-job` fetches the
+   page server-side and reduces it to readable text, preferring the `<main>`
+   or `<article>` region and stripping navigation. The text lands in an
+   editable box, so a page that pulls in extra boilerplate can be trimmed
+   before screening.
 1. **Upload or paste a resume.** `POST /api/extract` turns a PDF, DOCX or TXT
    file into plain text ([unpdf](https://github.com/unjs/unpdf) and
    [mammoth](https://github.com/mwilliamson/mammoth.js)). The text lands in an
@@ -21,6 +26,25 @@ so the API key never reaches the browser.
    [zod](https://zod.dev) schema. The same schema is embedded in the prompt as
    JSON Schema, so what the model is asked for and what the UI accepts can't
    drift apart. A failed response is reported, never half-rendered.
+
+### Fetching URLs safely
+
+An endpoint that makes the server fetch a visitor-supplied URL is a
+server-side request forgery risk by construction, so
+[`lib/jobFetcher.ts`](lib/jobFetcher.ts):
+
+- accepts only `http`/`https`, rejecting `file:`, `ftp:` and the rest;
+- resolves the hostname and refuses private, loopback, link-local and
+  carrier-grade NAT ranges — including `169.254.169.254`, the cloud metadata
+  endpoint;
+- follows redirects manually, re-checking the address at every hop, since a
+  public hostname can redirect to an internal one;
+- caps the response at 2 MB with a 12-second timeout, and accepts only HTML
+  or plain text.
+
+Job boards that render postings with JavaScript, or that block unfamiliar
+clients (LinkedIn and Indeed among them), can't be read this way. The app
+says so and asks for pasted text instead.
 
 ### Notes from building it
 
@@ -62,8 +86,9 @@ npm run dev                  # http://localhost:3000
 ```
 app/
   page.tsx              Landing page and masthead
-  api/analyze/route.ts  Screening endpoint (server-only, holds the key)
-  api/extract/route.ts  File → text endpoint
+  api/analyze/route.ts    Screening endpoint (server-only, holds the key)
+  api/extract/route.ts    File → text endpoint
+  api/fetch-job/route.ts  Job posting URL → text endpoint
 components/
   Screener.tsx          Input form, upload, loading and error states
   ReportView.tsx        The rendered report
@@ -71,6 +96,7 @@ lib/
   analyzer.ts           Prompt, model call, fallback, validation
   schema.ts             Report contract (zod → JSON Schema)
   resumeParser.ts       PDF / DOCX / TXT extraction
+  jobFetcher.ts         Job posting URL → text, with SSRF guards
 streamlit-app/          The original Python + Streamlit version
 ```
 
@@ -93,3 +119,5 @@ streamlit run app.py
 - The model can misread unusual resume formats; the extracted text is editable
   for that reason.
 - Scanned, image-only PDFs have no text layer and can't be read.
+- Job posting links work for server-rendered pages. Postings behind a login,
+  or rendered entirely in the browser, need to be pasted.

@@ -16,14 +16,16 @@ export default function Home() {
         </h1>
 
         <p className="mt-6 max-w-2xl text-[1.0625rem] leading-relaxed text-ink-soft text-pretty">
-          Paste a job description and a candidate resume. Get back a structured
-          screening report — match score, the evidence for and against, and the
-          questions worth asking in the first interview.
+          Link to a job posting or paste the description, then upload the
+          candidate&rsquo;s resume. Get back a structured screening report — match
+          score, the evidence for and against, and the questions worth asking in
+          the first interview.
         </p>
 
         <dl className="mt-8 flex flex-wrap gap-x-10 gap-y-3">
           {[
-            ["Input", "PDF · DOCX · plain text"],
+            ["Job", "Posting link or pasted text"],
+            ["Resume", "PDF · DOCX · plain text"],
             ["Output", "Structured, schema-checked"],
             ["Time", "About 10 seconds"],
           ].map(([term, detail]) => (
