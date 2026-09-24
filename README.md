@@ -23,11 +23,34 @@ so the API key never reaches the browser.
    editable box so the extraction can be checked before it's sent.
 3. **Screen the candidate.** `POST /api/analyze` builds an injection-resistant
    prompt — resume and job description are delimited and explicitly marked as
-   data, not instructions — and asks the model for a JSON report.
-4. **Validate before rendering.** The response is parsed against a
+   data, not instructions — and asks the model to work as a checklist: list
+   every requirement the posting states, mark each required or preferred, and
+   grade it met / partial / missing with the resume detail that justifies it.
+4. **Compute the score in code.** The model is explicitly told *not* to output
+   a score. [`lib/scoring.ts`](lib/scoring.ts) derives it from the gradings:
+   required requirements weigh 1, preferred 0.35, and met / partial / missing
+   earn full / half / no credit. The verdict follows the score, with a floor
+   for missing must-haves — two unmet requirements cap a candidate at Hold
+   however many nice-to-haves they have.
+5. **Validate before rendering.** The response is parsed against a
    [zod](https://zod.dev) schema. The same schema is embedded in the prompt as
    JSON Schema, so what the model is asked for and what the UI accepts can't
    drift apart. A failed response is reported, never half-rendered.
+
+### Why the score isn't generated
+
+Asking a model for "a match percentage" gets a different number every run —
+the same resume scored 62% to 72% across four runs of the first version. It
+is also unfalsifiable: there is nothing behind the number to check.
+
+Grading one requirement at a time is a smaller, better-defined judgement, and
+the arithmetic on top is deterministic. Run-to-run spread on the sample pair
+dropped from about 10 points to about 6, and what remains comes from the model
+finding 11 or 12 requirements in the same posting rather than from the score
+itself. More importantly the report now shows its working: every point is
+traceable to a requirement and the resume line behind it. Extracting the
+requirements in a separate cached pass would close most of the remaining gap,
+at the cost of a second model call per screening.
 
 ### Fetching URLs safely
 
@@ -54,10 +77,9 @@ says so and asks for pasted text instead.
   returns `unsupported_capability`, so the schema goes in the prompt instead.
   Without it the model invents its own field names. The code tries JSON mode
   first, remembers a rejection, and falls back to a plain request.
-- **Scores vary by a few points between runs** even at `temperature: 0`, since
-  the gateway doesn't guarantee determinism and `seed` isn't supported. A
-  rubric-based score (grade each requirement, compute the percentage in code)
-  would be the fix.
+- **The gateway isn't deterministic** even at `temperature: 0`, and `seed` is
+  rejected outright, which is why the score is computed from gradings rather
+  than generated.
 - **The demo is rate limited** to 10 screenings per hour per visitor, plus a
   global daily budget (`DAILY_SCREENING_LIMIT`, default 100) so a link that
   gets passed around can't run up the bill. Inputs are capped too. Both
@@ -71,6 +93,7 @@ says so and asks for pasted text instead.
 npm install
 cp .env.example .env.local   # then add your API key
 npm run dev                  # http://localhost:3000
+npm test                     # scoring unit tests, no API key needed
 ```
 
 | Variable          | Required | Default                                | Purpose                       |
@@ -97,9 +120,11 @@ app/
   api/fetch-job/route.ts  Job posting URL → text endpoint
 components/
   Screener.tsx          Input form, upload, loading and error states
-  ReportView.tsx        The rendered report
+  ReportView.tsx        The rendered report and requirement checklist
 lib/
   analyzer.ts           Prompt, model call, fallback, validation
+  scoring.ts            Gradings → score and recommendation
+  scoring.test.ts       Unit tests for the scoring rules
   schema.ts             Report contract (zod → JSON Schema)
   resumeParser.ts       PDF / DOCX / TXT extraction
   jobFetcher.ts         Job posting URL → text, with SSRF guards

@@ -1,4 +1,9 @@
-import type { HiringRecommendation, ScreeningReport } from "@/lib/schema";
+import type {
+  HiringRecommendation,
+  Requirement,
+  RequirementStatus,
+  ScreeningReport,
+} from "@/lib/schema";
 
 const RECOMMENDATION_STYLE: Record<
   HiringRecommendation,
@@ -104,6 +109,83 @@ function BulletPanel({
   );
 }
 
+const STATUS_STYLE: Record<
+  RequirementStatus,
+  { mark: string; label: string; text: string; border: string }
+> = {
+  met: { mark: "✓", label: "Met", text: "text-sage", border: "border-sage/50" },
+  partial: {
+    mark: "~",
+    label: "Partial",
+    text: "text-amber",
+    border: "border-amber/50",
+  },
+  missing: {
+    mark: "✕",
+    label: "Missing",
+    text: "text-oxblood",
+    border: "border-oxblood/50",
+  },
+};
+
+/** The checklist the score is computed from — the report's evidence base. */
+function RequirementsTable({
+  requirements,
+  delay,
+}: {
+  requirements: Requirement[];
+  delay: number;
+}) {
+  return (
+    <section
+      className="animate-rise mt-6 border border-rule bg-[#fffdf8]/60 p-6 sm:p-7"
+      style={{ animationDelay: `${delay}ms` }}
+    >
+      <header className="mb-1 flex items-baseline justify-between gap-4 border-b border-rule pb-3">
+        <h3 className="font-display text-xl font-semibold tracking-tight">
+          Requirement Checklist
+        </h3>
+        <span className="label">00 / What the score is built from</span>
+      </header>
+
+      <ul className="divide-y divide-rule/70">
+        {requirements.map((item, i) => {
+          const style = STATUS_STYLE[item.status];
+          return (
+            <li key={i} className="grid grid-cols-[1.5rem_1fr] gap-x-3 py-4 sm:gap-x-4">
+              <span
+                aria-hidden
+                className={`mt-0.5 font-mono text-sm leading-6 ${style.text}`}
+              >
+                {style.mark}
+              </span>
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+                  <h4 className="font-medium text-[0.9375rem] leading-6 text-ink">
+                    {item.requirement}
+                  </h4>
+                  <span className={`label ${style.text}`}>
+                    <span className="sr-only">Status: </span>
+                    {style.label}
+                  </span>
+                  {item.importance === "required" ? (
+                    <span className="label">Required</span>
+                  ) : (
+                    <span className="label opacity-70">Preferred</span>
+                  )}
+                </div>
+                <p className="mt-1 text-sm leading-relaxed text-ink-soft">
+                  {item.evidence}
+                </p>
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+    </section>
+  );
+}
+
 export function ReportView({ report }: { report: ScreeningReport }) {
   const recommendation = RECOMMENDATION_STYLE[report.hiring_recommendation];
 
@@ -130,6 +212,13 @@ export function ReportView({ report }: { report: ScreeningReport }) {
             </span>
             <span className="mt-2 ml-1 font-display text-2xl text-ink-faint">%</span>
           </div>
+          <p className="mt-3 font-mono text-xs leading-relaxed text-ink-soft">
+            {report.tally.met} met · {report.tally.partial} partial ·{" "}
+            {report.tally.missing} missing
+            <span className="block text-ink-faint">
+              of {report.tally.total} requirements
+            </span>
+          </p>
         </div>
 
         <div className="flex flex-col justify-end gap-6">
@@ -148,26 +237,28 @@ export function ReportView({ report }: { report: ScreeningReport }) {
         </div>
       </div>
 
-      <div className="mt-12 grid gap-6 lg:grid-cols-2">
+      <RequirementsTable requirements={report.requirements} delay={80} />
+
+      <div className="mt-6 grid gap-6 lg:grid-cols-2">
         <BulletPanel
           title="Key Strengths"
           index="01 / Evidence for"
           items={report.key_strengths}
           accent="bg-sage"
-          delay={120}
+          delay={160}
         />
         <BulletPanel
           title="Critical Gaps"
           index="02 / Evidence against"
           items={report.critical_gaps}
           accent="bg-oxblood"
-          delay={200}
+          delay={240}
         />
       </div>
 
       <section
         className="animate-rise mt-6 border border-rule bg-[#fffdf8]/60 p-6 sm:p-7"
-        style={{ animationDelay: "280ms" }}
+        style={{ animationDelay: "320ms" }}
       >
         <header className="mb-5 flex items-baseline justify-between gap-4 border-b border-rule pb-3">
           <h3 className="font-display text-xl font-semibold tracking-tight">
