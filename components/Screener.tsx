@@ -6,7 +6,9 @@ import { ReportView } from "@/components/ReportView";
 import { SAMPLE_JOB_DESCRIPTION, SAMPLE_RESUME } from "@/lib/sample";
 import type { ScreeningReport } from "@/lib/schema";
 
-const ACCEPTED = ".txt,.pdf,.docx";
+const ACCEPTED_EXTENSIONS = ["txt", "pdf", "docx"];
+const ACCEPTED = ACCEPTED_EXTENSIONS.map((ext) => `.${ext}`).join(",");
+const MAX_FILE_BYTES = 5 * 1024 * 1024;
 
 /** Shows where fetched text came from, e.g. "boards.greenhouse.io". */
 function hostOf(url: string): string {
@@ -34,11 +36,19 @@ export function Screener() {
   const [dragging, setDragging] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
   const reportAnchor = useRef<HTMLDivElement>(null);
+  /**
+   * Bumped whenever the user resets or replaces the inputs. Responses that
+   * come back against an older value are dropped, so clearing the form
+   * mid-request can't be undone by a late reply landing on top of it.
+   */
+  const generation = useRef(0);
+  const busy = analyzing || extracting || fetchingJob;
 
   const ready = jobDescription.trim().length > 0 && resumeText.trim().length > 0;
 
   async function fetchJobUrl() {
-    if (!jobUrl.trim() || fetchingJob) return;
+    if (!jobUrl.trim() || busy) return;
+    const ticket = generation.current;
     setError(null);
     setFetchingJob(true);
     try {
@@ -48,6 +58,7 @@ export function Screener() {
         body: JSON.stringify({ url: jobUrl }),
       });
       const data = (await response.json()) as { text?: string; error?: string };
+      if (ticket !== generation.current) return;
       if (!response.ok || !data.text) {
         setJobSource(null);
         setError({ label: "Link not read", message: data.error ?? "Couldn't read that link." });
@@ -55,18 +66,38 @@ export function Screener() {
       }
       setJobDescription(data.text);
       setJobSource(hostOf(jobUrl));
+      setReport(null);
     } catch {
+      if (ticket !== generation.current) return;
       setJobSource(null);
       setError({
         label: "Link not read",
         message: "Couldn't reach that link. Check your connection, or paste the description.",
       });
     } finally {
-      setFetchingJob(false);
+      if (ticket === generation.current) setFetchingJob(false);
     }
   }
 
   async function handleFile(file: File) {
+    if (busy) return;
+    if (file.size > MAX_FILE_BYTES) {
+      setError({
+        label: "File not read",
+        message: "That file is larger than 5 MB. Upload a smaller file, or paste the text.",
+      });
+      return;
+    }
+    const extension = file.name.split(".").pop()?.toLowerCase() ?? "";
+    if (!ACCEPTED_EXTENSIONS.includes(extension)) {
+      setError({
+        label: "File not read",
+        message: `That file type isn't supported. Upload one of: ${ACCEPTED_EXTENSIONS.join(", ")}.`,
+      });
+      return;
+    }
+
+    const ticket = generation.current;
     setError(null);
     setExtracting(true);
     setFileName(file.name);
@@ -75,40 +106,51 @@ export function Screener() {
       body.append("file", file);
       const response = await fetch("/api/extract", { method: "POST", body });
       const data = (await response.json()) as { text?: string; error?: string };
+      if (ticket !== generation.current) return;
       if (!response.ok || !data.text) {
         setFileName(null);
         setError({ label: "File not read", message: data.error ?? "Could not read that file." });
         return;
       }
       setResumeText(data.text);
+      setReport(null);
     } catch {
+      if (ticket !== generation.current) return;
       setFileName(null);
       setError({
         label: "File not read",
         message: "Could not upload that file. Check your connection and try again.",
       });
     } finally {
-      setExtracting(false);
+      if (ticket === generation.current) setExtracting(false);
     }
   }
 
   function onDrop(event: DragEvent<HTMLDivElement>) {
     event.preventDefault();
     setDragging(false);
+    if (busy) return;
     const file = event.dataTransfer.files?.[0];
     if (file) void handleFile(file);
   }
 
   function loadExample() {
+    generation.current += 1;
     setJobDescription(SAMPLE_JOB_DESCRIPTION);
     setResumeText(SAMPLE_RESUME);
     setFileName(null);
     setJobUrl("");
     setJobSource(null);
     setError(null);
+    // The old report described a different candidate.
+    setReport(null);
+    setAnalyzing(false);
+    setExtracting(false);
+    setFetchingJob(false);
   }
 
   function reset() {
+    generation.current += 1;
     setJobDescription("");
     setResumeText("");
     setFileName(null);
@@ -116,9 +158,13 @@ export function Screener() {
     setJobSource(null);
     setError(null);
     setReport(null);
+    setAnalyzing(false);
+    setExtracting(false);
+    setFetchingJob(false);
   }
 
   async function analyze() {
+    const ticket = generation.current;
     setError(null);
     setReport(null);
     setAnalyzing(true);
@@ -132,6 +178,7 @@ export function Screener() {
         report?: ScreeningReport;
         error?: string;
       };
+      if (ticket !== generation.current) return;
       if (!response.ok || !data.report) {
         setError({
           label: "Analysis failed",
@@ -140,16 +187,19 @@ export function Screener() {
         return;
       }
       setReport(data.report);
-      requestAnimationFrame(() =>
-        reportAnchor.current?.scrollIntoView({ behavior: "smooth", block: "start" }),
-      );
+      requestAnimationFrame(() => {
+        reportAnchor.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+        // Keyboard and screen-reader users get no cue from the scroll alone.
+        reportAnchor.current?.focus({ preventScroll: true });
+      });
     } catch {
+      if (ticket !== generation.current) return;
       setError({
         label: "Analysis failed",
         message: "Could not reach the server. Check your connection and try again.",
       });
     } finally {
-      setAnalyzing(false);
+      if (ticket === generation.current) setAnalyzing(false);
     }
   }
 
@@ -183,6 +233,7 @@ export function Screener() {
                   void fetchJobUrl();
                 }
               }}
+              disabled={busy}
               placeholder="Paste a link to the posting…"
               className="min-w-0 flex-1 bg-transparent text-sm text-ink outline-none placeholder:text-ink-faint"
               spellCheck={false}
@@ -190,7 +241,7 @@ export function Screener() {
             <button
               type="button"
               onClick={() => void fetchJobUrl()}
-              disabled={!jobUrl.trim() || fetchingJob}
+              disabled={!jobUrl.trim() || busy}
               className="shrink-0 cursor-pointer border border-ink/25 px-3 py-1.5 font-mono text-[0.6875rem] tracking-[0.14em] uppercase transition-colors hover:border-ink hover:bg-ink hover:text-paper disabled:cursor-not-allowed disabled:border-rule disabled:text-ink-faint disabled:hover:bg-transparent"
             >
               {fetchingJob ? "Reading…" : "Fetch"}
@@ -203,6 +254,7 @@ export function Screener() {
             onChange={(event) => {
               setJobDescription(event.target.value);
               if (jobSource) setJobSource(null);
+              if (error) setError(null);
             }}
             placeholder="…or paste the full job description here — responsibilities, requirements, nice-to-haves."
             className="field h-[15.5rem] w-full resize-y p-4 text-[0.9375rem] leading-relaxed"
@@ -223,6 +275,7 @@ export function Screener() {
 
           <div
             onDragOver={(event) => {
+              if (busy) return;
               event.preventDefault();
               setDragging(true);
             }}
@@ -251,7 +304,8 @@ export function Screener() {
             <button
               type="button"
               onClick={() => fileInput.current?.click()}
-              className="shrink-0 cursor-pointer border border-ink/25 px-3 py-1.5 font-mono text-[0.6875rem] tracking-[0.14em] uppercase transition-colors hover:border-ink hover:bg-ink hover:text-paper"
+              disabled={busy}
+              className="shrink-0 cursor-pointer border border-ink/25 px-3 py-1.5 font-mono text-[0.6875rem] tracking-[0.14em] uppercase transition-colors hover:border-ink hover:bg-ink hover:text-paper disabled:cursor-not-allowed disabled:border-rule disabled:text-ink-faint disabled:hover:bg-transparent disabled:hover:text-ink-faint"
             >
               Browse
             </button>
@@ -271,7 +325,10 @@ export function Screener() {
           <textarea
             id="resume"
             value={resumeText}
-            onChange={(event) => setResumeText(event.target.value)}
+            onChange={(event) => {
+              setResumeText(event.target.value);
+              if (error) setError(null);
+            }}
             placeholder="…or paste the resume text here. Uploaded files land here first so you can check the extraction."
             className="field h-[15.5rem] w-full resize-y p-4 text-[0.9375rem] leading-relaxed"
             spellCheck={false}
@@ -284,7 +341,7 @@ export function Screener() {
         <button
           type="button"
           onClick={() => void analyze()}
-          disabled={!ready || analyzing || extracting || fetchingJob}
+          disabled={!ready || busy}
           className="group relative cursor-pointer bg-ink px-8 py-3.5 font-display text-lg font-semibold tracking-tight text-paper transition-all hover:bg-oxblood disabled:cursor-not-allowed disabled:bg-ink/25"
         >
           {analyzing ? "Screening…" : "Screen candidate"}
@@ -315,6 +372,16 @@ export function Screener() {
         )}
       </div>
 
+      <p className="sr-only" role="status" aria-live="polite">
+        {analyzing
+          ? "Screening in progress"
+          : extracting
+            ? "Reading the uploaded file"
+            : fetchingJob
+              ? "Reading the job posting link"
+              : ""}
+      </p>
+
       {analyzing && (
         <div className="mt-8 flex items-center gap-3">
           <span
@@ -341,7 +408,7 @@ export function Screener() {
         </div>
       )}
 
-      <div ref={reportAnchor} className="scroll-mt-10">
+      <div ref={reportAnchor} tabIndex={-1} className="scroll-mt-10 outline-none">
         {report && <ReportView report={report} />}
       </div>
     </>

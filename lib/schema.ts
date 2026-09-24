@@ -44,15 +44,19 @@ export const requirementSchema = z
         "One short sentence citing the specific resume detail that justifies the status, or stating that the resume shows nothing on this point.",
       ),
   })
-  .strict();
+  // Unknown keys are dropped rather than rejected: a stray field the model
+  // volunteers shouldn't throw away an otherwise usable report.
+  .strip();
 
 /** Exactly what the model is asked to return. */
 export const modelReportSchema = z
   .object({
     requirements: z
       .array(requirementSchema)
-      .min(3)
-      .max(14)
+      // Wide on purpose: a two-line posting genuinely has one or two
+      // requirements, and a corporate posting can list twenty-five.
+      .min(1)
+      .max(30)
       .describe(
         "Every distinct requirement the job description states, each graded against the resume. Cover the whole job description; do not invent requirements it does not mention.",
       ),
@@ -72,11 +76,10 @@ export const modelReportSchema = z
         "Tailored interview questions a recruiter should ask to probe the candidate's critical gaps and validate their claimed strengths.",
       ),
   })
-  .strict();
+  .strip();
 
 export type Requirement = z.infer<typeof requirementSchema>;
 export type RequirementStatus = Requirement["status"];
-export type RequirementImportance = Requirement["importance"];
 export type ModelReport = z.infer<typeof modelReportSchema>;
 
 export type HiringRecommendation = (typeof HIRING_RECOMMENDATIONS)[number];

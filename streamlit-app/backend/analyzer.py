@@ -3,7 +3,7 @@ Core analysis engine for the AI Resume Screener.
 
 This module owns all direct interaction with the language model provider.
 It is deliberately written against an OpenAI-compatible `/chat/completions`
-API (served here via an OpenRouter-style router) rather than a single
+API (served here via Experiential Labs' gateway) rather than a single
 vendor's native SDK, since a router can transparently proxy the request to
 any one of many underlying models. It is responsible for:
 

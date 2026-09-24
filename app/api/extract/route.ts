@@ -10,7 +10,7 @@ export async function POST(request: Request) {
   const limit = checkRateLimit(`extract:${clientKey(request)}`, 30);
   if (!limit.allowed) {
     return NextResponse.json(
-      { error: "Too many uploads. Wait a few minutes and try again." },
+      { error: "Too many uploads from this address. Try again in an hour, or paste the resume text." },
       { status: 429 },
     );
   }

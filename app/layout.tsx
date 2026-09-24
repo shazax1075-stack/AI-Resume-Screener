@@ -20,10 +20,30 @@ const plexMono = IBM_Plex_Mono({
   weight: ["400", "500"],
 });
 
+const SITE_URL = "https://resume-ai-screener.vercel.app";
+const TITLE = "Screening Desk — AI Resume Screener";
+const DESCRIPTION =
+  "Screen a candidate resume against a job posting and get an evidence-based hiring report: a checklist-derived match score, strengths, gaps, and tailored interview questions.";
+
 export const metadata: Metadata = {
-  title: "Screening Desk — AI Resume Screener",
-  description:
-    "Screen a candidate resume against a job description and get an evidence-based hiring report: match score, strengths, gaps, and tailored interview questions.",
+  metadataBase: new URL(SITE_URL),
+  title: TITLE,
+  description: DESCRIPTION,
+  // The demo is shared by pasting the link into LinkedIn, Slack or an
+  // application, so the preview card is the first impression more often
+  // than the page itself is.
+  openGraph: {
+    type: "website",
+    url: SITE_URL,
+    siteName: "Screening Desk",
+    title: TITLE,
+    description: DESCRIPTION,
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: TITLE,
+    description: DESCRIPTION,
+  },
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

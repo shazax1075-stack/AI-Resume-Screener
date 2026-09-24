@@ -12,7 +12,7 @@ export async function POST(request: Request) {
   const limit = checkRateLimit(`fetch-job:${clientKey(request)}`, 20);
   if (!limit.allowed) {
     return NextResponse.json(
-      { error: "Too many link fetches. Wait a few minutes, or paste the description." },
+      { error: "Too many link fetches from this address. Try again in an hour, or paste the description." },
       { status: 429 },
     );
   }

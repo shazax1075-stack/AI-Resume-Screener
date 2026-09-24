@@ -1,5 +1,6 @@
 import OpenAI from "openai";
 
+import { MAX_INPUT_CHARS } from "@/lib/limits";
 import { buildReport } from "@/lib/scoring";
 import {
   modelReportJsonSchema,
@@ -18,9 +19,6 @@ import {
 
 const DEFAULT_BASE_URL = "https://api.experientiallabs.ai/v1";
 const DEFAULT_MODEL = "qwen3.8-27b";
-
-/** Guards against pathological inputs running up the API bill. */
-export const MAX_INPUT_CHARS = 20_000;
 
 const SYSTEM_INSTRUCTION = [
   "You are an elite, impartial technical recruiter and hiring analyst with",
@@ -55,10 +53,25 @@ const SYSTEM_INSTRUCTION = [
   JSON.stringify(modelReportJsonSchema, null, 2),
 ].join("\n");
 
+/**
+ * An analysis failure with a message written for the person using the app.
+ * `detail` carries the internals (gateway text, schema issues) for the
+ * server log only -- a visitor should never read a Zod error or an upstream
+ * API message, and `upstream` marks failures that are not the caller's
+ * fault so the route can answer 502 rather than 400.
+ */
 export class AnalyzerError extends Error {
-  constructor(message: string) {
+  readonly detail?: string;
+  readonly upstream: boolean;
+
+  constructor(
+    message: string,
+    options: { detail?: string; upstream?: boolean } = {},
+  ) {
     super(message);
     this.name = "AnalyzerError";
+    this.detail = options.detail;
+    this.upstream = options.upstream ?? false;
   }
 }
 
@@ -73,7 +86,12 @@ function buildClient(): OpenAI {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
     throw new AnalyzerError(
-      "OPENAI_API_KEY is not set. Add it to .env.local locally, or to the project's environment variables in Vercel.",
+      "This demo isn't configured to reach the model right now.",
+      {
+        detail:
+          "OPENAI_API_KEY is not set. Add it to .env.local locally, or to the project's environment variables in Vercel.",
+        upstream: true,
+      },
     );
   }
   return new OpenAI({
@@ -106,6 +124,21 @@ function stripCodeFences(text: string): string {
     .trim();
 }
 
+function describe(error: unknown): string {
+  if (error instanceof AnalyzerError) {
+    return error.detail ?? error.message;
+  }
+  return error instanceof Error ? error.message : String(error);
+}
+
+/** True when the gateway rejected `response_format` specifically. */
+function rejectsJsonMode(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /response_format|unsupported_parameter|unsupported_capability|unsupported_value/i.test(
+    message,
+  );
+}
+
 async function requestCompletion(
   client: OpenAI,
   model: string,
@@ -125,7 +158,9 @@ async function requestCompletion(
 
   const content = completion.choices?.[0]?.message?.content;
   if (!content?.trim()) {
-    throw new AnalyzerError("The model returned an empty response.");
+    throw new AnalyzerError("The model returned an empty response. Please try again.", {
+      upstream: true,
+    });
   }
   return content;
 }
@@ -135,7 +170,10 @@ function parseReport(content: string): ModelReport {
   try {
     parsed = JSON.parse(stripCodeFences(content));
   } catch {
-    throw new AnalyzerError("The model did not return valid JSON.");
+    throw new AnalyzerError(
+      "The model's reply wasn't valid JSON. Please try again.",
+      { detail: "response was not parseable JSON", upstream: true },
+    );
   }
 
   const result = modelReportSchema.safeParse(parsed);
@@ -143,7 +181,10 @@ function parseReport(content: string): ModelReport {
     const issues = result.error.issues
       .map((issue) => `${issue.path.join(".") || "(root)"}: ${issue.message}`)
       .join("; ");
-    throw new AnalyzerError(`The model's JSON did not match the report format (${issues}).`);
+    throw new AnalyzerError(
+      "The model's reply wasn't in the expected shape. Please try again.",
+      { detail: `schema mismatch: ${issues}`, upstream: true },
+    );
   }
   return result.data;
 }
@@ -169,8 +210,9 @@ export async function analyzeResume(
   const client = buildClient();
   const model = process.env.OPENAI_MODEL ?? DEFAULT_MODEL;
   const prompt = buildPrompt(resumeText, jobDescription);
-  const errors: string[] = [];
+  const attempts: string[] = [];
   const triedJsonMode = !plainJsonModels.has(model);
+  let jsonModeRejected = false;
 
   if (triedJsonMode) {
     try {
@@ -178,7 +220,8 @@ export async function analyzeResume(
         parseReport(await requestCompletion(client, model, prompt, true)),
       );
     } catch (error) {
-      errors.push(`json mode: ${error instanceof Error ? error.message : String(error)}`);
+      jsonModeRejected = rejectsJsonMode(error);
+      attempts.push(`json mode: ${describe(error)}`);
     }
   }
 
@@ -186,13 +229,16 @@ export async function analyzeResume(
     const report = buildReport(
       parseReport(await requestCompletion(client, model, prompt, false)),
     );
-    if (triedJsonMode) plainJsonModels.add(model);
+    // Only remember the model as JSON-mode-incapable when it said so: a
+    // transient failure shouldn't permanently downgrade every later request.
+    if (jsonModeRejected) plainJsonModels.add(model);
     return report;
   } catch (error) {
-    errors.push(`plain mode: ${error instanceof Error ? error.message : String(error)}`);
+    attempts.push(`plain mode: ${describe(error)}`);
   }
 
   throw new AnalyzerError(
-    `Unable to obtain a valid screening report from the model. Details: ${errors.join(" | ")}`,
+    "The model couldn't produce a usable screening report. Please try again in a moment.",
+    { detail: attempts.join(" | "), upstream: true },
   );
 }

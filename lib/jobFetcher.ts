@@ -1,6 +1,8 @@
 import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
 
+import { clampToInputLimit } from "@/lib/limits";
+
 /**
  * Fetches a job posting URL and reduces the page to readable text.
  *
@@ -14,7 +16,6 @@ import { isIP } from "node:net";
 const FETCH_TIMEOUT_MS = 12_000;
 const MAX_BYTES = 2 * 1024 * 1024;
 const MAX_REDIRECTS = 3;
-export const MAX_JOB_CHARS = 20_000;
 
 export class JobFetchError extends Error {
   constructor(message: string) {
@@ -72,7 +73,9 @@ async function assertPublicHost(hostname: string): Promise<void> {
 
 function parseUrl(raw: string): URL {
   const trimmed = raw.trim();
-  const scheme = trimmed.match(/^([a-z][a-z0-9+.-]*):/i)?.[1]?.toLowerCase();
+  // Requires the "//" so "acme.com:8080/jobs" reads as a host and port,
+  // the way a browser address bar treats it, not as a scheme named acme.com.
+  const scheme = trimmed.match(/^([a-z][a-z0-9+.-]*):\/\//i)?.[1]?.toLowerCase();
   if (scheme && scheme !== "http" && scheme !== "https") {
     throw new JobFetchError("Only http and https links are supported.");
   }
@@ -89,6 +92,15 @@ function parseUrl(raw: string): URL {
     throw new JobFetchError("Only http and https links are supported.");
   }
   return url;
+}
+
+function codePointOrReplacement(code: number, original: string): string {
+  if (!Number.isInteger(code) || code < 0 || code > 0x10ffff) return "\ufffd";
+  try {
+    return String.fromCodePoint(code);
+  } catch {
+    return original;
+  }
 }
 
 /** Strips markup, scripts and boilerplate down to readable text. */
@@ -126,12 +138,22 @@ export function htmlToText(html: string): string {
     .replace(/&(lsquo|rsquo);/gi, "'")
     .replace(/&(ldquo|rdquo);/gi, '"')
     .replace(/&hellip;/gi, "…")
-    .replace(/&#x([0-9a-f]+);/gi, (_, hex: string) => String.fromCodePoint(parseInt(hex, 16)))
-    .replace(/&#(\d+);/g, (_, code: string) => String.fromCodePoint(Number(code)))
+    // A page may contain a code point outside Unicode's range; browsers
+    // render those as U+FFFD, and String.fromCodePoint would throw.
+    .replace(/&#x([0-9a-f]+);/gi, (match, hex: string) =>
+      codePointOrReplacement(parseInt(hex, 16), match),
+    )
+    .replace(/&#(\d+);/g, (match, code: string) =>
+      codePointOrReplacement(Number(code), match),
+    )
     .replace(/[ \t ]+/g, " ")
     .replace(/ ?\n ?/g, "\n")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
+}
+
+function isReadableType(contentType: string | null): boolean {
+  return /text\/html|text\/plain|application\/xhtml/i.test(contentType ?? "");
 }
 
 async function readCapped(response: Response): Promise<string> {
@@ -156,6 +178,10 @@ async function readCapped(response: Response): Promise<string> {
 export async function fetchJobDescription(rawUrl: string): Promise<string> {
   let url = parseUrl(rawUrl);
   let response: Response | null = null;
+  // One budget for the whole chain: a per-hop timeout lets four slow hops
+  // outlast the serverless function itself, which replaces this module's
+  // friendly message with a platform timeout page.
+  const deadline = AbortSignal.timeout(FETCH_TIMEOUT_MS);
 
   for (let hop = 0; hop <= MAX_REDIRECTS; hop += 1) {
     await assertPublicHost(url.hostname);
@@ -163,7 +189,7 @@ export async function fetchJobDescription(rawUrl: string): Promise<string> {
     try {
       response = await fetch(url, {
         redirect: "manual",
-        signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+        signal: deadline,
         headers: {
           // Some job boards return an error page to an unidentified client.
           "User-Agent":
@@ -173,7 +199,10 @@ export async function fetchJobDescription(rawUrl: string): Promise<string> {
         },
       });
     } catch (error) {
-      if (error instanceof Error && error.name === "TimeoutError") {
+      if (
+        error instanceof Error &&
+        (error.name === "TimeoutError" || error.name === "AbortError")
+      ) {
         throw new JobFetchError("That page took too long to respond. Paste the description instead.");
       }
       throw new JobFetchError("Couldn't reach that page. Check the link, or paste the description instead.");
@@ -181,6 +210,9 @@ export async function fetchJobDescription(rawUrl: string): Promise<string> {
 
     if (response.status >= 300 && response.status < 400) {
       const location = response.headers.get("location");
+      // Redirect bodies are never read; release the socket rather than
+      // leaving it for the garbage collector.
+      await response.body?.cancel().catch(() => {});
       if (!location) break;
       try {
         url = new URL(location, url);
@@ -200,6 +232,10 @@ export async function fetchJobDescription(rawUrl: string): Promise<string> {
     throw new JobFetchError("That page redirected too many times.");
   }
 
+  if (!response.ok || !isReadableType(response.headers.get("content-type"))) {
+    await response.body?.cancel().catch(() => {});
+  }
+
   if (response.status === 401 || response.status === 403) {
     throw new JobFetchError(
       "That site blocked the request — many job boards do. Open the posting and paste the text instead.",
@@ -212,7 +248,7 @@ export async function fetchJobDescription(rawUrl: string): Promise<string> {
   }
 
   const contentType = response.headers.get("content-type") ?? "";
-  if (!/text\/html|text\/plain|application\/xhtml/i.test(contentType)) {
+  if (!isReadableType(contentType)) {
     throw new JobFetchError(
       "That link isn't a web page. Paste the job description text instead.",
     );
@@ -227,5 +263,7 @@ export async function fetchJobDescription(rawUrl: string): Promise<string> {
     );
   }
 
-  return text.length > MAX_JOB_CHARS ? `${text.slice(0, MAX_JOB_CHARS).trimEnd()}…` : text;
+  // Clamped to what /api/analyze accepts: text this endpoint produced must
+  // never be rejected downstream for being too long.
+  return clampToInputLimit(text);
 }

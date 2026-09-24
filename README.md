@@ -2,6 +2,11 @@
 
 **[Live demo →](https://resume-ai-screener.vercel.app/)**
 
+![A screening report: a 66% match score, the verdict "Proceed to Interview", a
+requirement checklist grading each requirement met, partial or missing with the
+resume evidence behind it, then strengths, gaps and suggested interview
+questions.](docs/report.png)
+
 Link a job posting or paste the description, add a candidate resume, and get
 back a structured screening report: a match score, the evidence for and against
 the candidate, and interview questions aimed at the gaps.
@@ -93,15 +98,15 @@ says so and asks for pasted text instead.
 npm install
 cp .env.example .env.local   # then add your API key
 npm run dev                  # http://localhost:3000
-npm test                     # scoring unit tests, no API key needed
+npm test                     # unit tests (scoring, SSRF guards), no API key needed
 ```
 
-| Variable          | Required | Default                                | Purpose                       |
-| ----------------- | -------- | -------------------------------------- | ----------------------------- |
-| `OPENAI_API_KEY`  | Yes      | —                                      | Key for the gateway           |
-| `OPENAI_BASE_URL` | No       | `https://api.experientiallabs.ai/v1`   | Any OpenAI-compatible endpoint |
-| `OPENAI_MODEL`    | No       | `qwen3.8-27b`                          | Model slug to request         |
-| `DAILY_SCREENING_LIMIT` | No | `100`                                | Screenings per day, all visitors |
+| Variable                | Required | Default                              | Purpose                          |
+| ----------------------- | -------- | ------------------------------------ | -------------------------------- |
+| `OPENAI_API_KEY`        | Yes      | —                                    | Key for the gateway              |
+| `OPENAI_BASE_URL`       | No       | `https://api.experientiallabs.ai/v1` | Any OpenAI-compatible endpoint   |
+| `OPENAI_MODEL`          | No       | `qwen3.8-27b`                        | Model slug to request            |
+| `DAILY_SCREENING_LIMIT` | No       | `100`                                | Screenings per day, all visitors |
 
 ## Deploying to Vercel
 
@@ -114,21 +119,26 @@ npm test                     # scoring unit tests, no API key needed
 
 ```
 app/
+  layout.tsx              Fonts, metadata and the link preview card
   page.tsx                Landing page and masthead
+  globals.css             Design tokens: paper, ink, oxblood, type scale
   api/analyze/route.ts    Screening endpoint (server-only, holds the key)
   api/extract/route.ts    File → text endpoint
   api/fetch-job/route.ts  Job posting URL → text endpoint
 components/
-  Screener.tsx          Input form, upload, loading and error states
-  ReportView.tsx        The rendered report and requirement checklist
+  Screener.tsx            Input form, upload, loading and error states
+  ReportView.tsx          The rendered report and requirement checklist
 lib/
-  analyzer.ts           Prompt, model call, fallback, validation
-  scoring.ts            Gradings → score and recommendation
-  scoring.test.ts       Unit tests for the scoring rules
-  schema.ts             Report contract (zod → JSON Schema)
-  resumeParser.ts       PDF / DOCX / TXT extraction
-  jobFetcher.ts         Job posting URL → text, with SSRF guards
-streamlit-app/          The original Python + Streamlit version
+  analyzer.ts             Prompt, model call, fallback, validation
+  scoring.ts              Gradings → score and recommendation
+  schema.ts               Report contract (zod → JSON Schema)
+  resumeParser.ts         PDF / DOCX / TXT extraction
+  jobFetcher.ts           Job posting URL → text, with SSRF guards
+  rateLimit.ts            Per-visitor limits and the global daily budget
+  limits.ts               Shared input ceilings
+  sample.ts               The one-click example
+  *.test.ts               Unit tests (scoring, SSRF guards, limits)
+streamlit-app/            The original Python + Streamlit version
 ```
 
 ## The Streamlit original
@@ -136,6 +146,12 @@ streamlit-app/          The original Python + Streamlit version
 This started as a Python/Streamlit app, kept in [`streamlit-app/`](streamlit-app/)
 for reference. Streamlit needs a long-running server holding a websocket per
 visitor, which Vercel's serverless model can't host — hence the rewrite.
+
+It is also the before picture for the scoring change above:
+[`streamlit-app/backend/schema.py`](streamlit-app/backend/schema.py) asks the
+model for `match_percentage` and `hiring_recommendation` directly. Watching the
+same resume come back as 62% and then 72% is what motivated deriving both from
+a checklist instead.
 
 ```bash
 cd streamlit-app

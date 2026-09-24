@@ -31,26 +31,26 @@ const RECOMMENDATION_STYLE: Record<
   },
 };
 
-function scoreTone(score: number): string {
-  if (score >= 75) return "text-sage";
-  if (score >= 50) return "text-amber";
-  return "text-oxblood";
-}
-
-function meterTone(score: number): string {
-  if (score >= 75) return "bg-sage";
-  if (score >= 50) return "bg-amber";
-  return "bg-oxblood";
-}
+/**
+ * Colour follows the verdict, not the raw score. A candidate missing three
+ * must-haves is a Reject however many nice-to-haves lifted the percentage,
+ * and a green 75 beside a red Reject badge reads as a bug.
+ */
+const VERDICT_TONE: Record<HiringRecommendation, { text: string; meter: string }> = {
+  "Strong Pass": { text: "text-sage", meter: "bg-sage" },
+  "Proceed to Interview": { text: "text-sage", meter: "bg-sage" },
+  Hold: { text: "text-amber", meter: "bg-amber" },
+  Reject: { text: "text-oxblood", meter: "bg-oxblood" },
+};
 
 /** Typographic score meter: a printed rule that fills to the score. */
-function ScoreMeter({ score }: { score: number }) {
+function ScoreMeter({ score, tone }: { score: number; tone: string }) {
   const clamped = Math.max(0, Math.min(100, score));
   return (
     <div className="w-full">
       <div className="relative h-[3px] w-full bg-rule/70">
         <div
-          className={`h-full origin-left ${meterTone(clamped)} animate-sweep`}
+          className={`h-full origin-left ${tone} animate-sweep`}
           style={{ ["--sweep-to" as string]: clamped / 100, transform: `scaleX(${clamped / 100})` }}
         />
         {[25, 50, 75].map((tick) => (
@@ -145,7 +145,7 @@ function RequirementsTable({
         <h3 className="font-display text-xl font-semibold tracking-tight">
           Requirement Checklist
         </h3>
-        <span className="label">00 / What the score is built from</span>
+        <span className="label">03 / What the score is built from</span>
       </header>
 
       <ul className="divide-y divide-rule/70">
@@ -188,6 +188,7 @@ function RequirementsTable({
 
 export function ReportView({ report }: { report: ScreeningReport }) {
   const recommendation = RECOMMENDATION_STYLE[report.hiring_recommendation];
+  const tone = VERDICT_TONE[report.hiring_recommendation];
 
   return (
     <div className="mt-16 sm:mt-20">
@@ -204,9 +205,7 @@ export function ReportView({ report }: { report: ScreeningReport }) {
           <span className="label block">Match score</span>
           <div className="mt-2 flex items-start">
             <span
-              className={`font-display text-[5.5rem] leading-[0.82] font-semibold tracking-tighter tabular-nums sm:text-[7rem] ${scoreTone(
-                report.match_percentage,
-              )}`}
+              className={`font-display text-[5.5rem] leading-[0.82] font-semibold tracking-tighter tabular-nums sm:text-[7rem] ${tone.text}`}
             >
               {report.match_percentage}
             </span>
@@ -233,7 +232,7 @@ export function ReportView({ report }: { report: ScreeningReport }) {
               </span>
             </div>
           </div>
-          <ScoreMeter score={report.match_percentage} />
+          <ScoreMeter score={report.match_percentage} tone={tone.meter} />
         </div>
       </div>
 
@@ -242,14 +241,14 @@ export function ReportView({ report }: { report: ScreeningReport }) {
       <div className="mt-6 grid gap-6 lg:grid-cols-2">
         <BulletPanel
           title="Key Strengths"
-          index="01 / Evidence for"
+          index="04 / Evidence for"
           items={report.key_strengths}
           accent="bg-sage"
           delay={160}
         />
         <BulletPanel
           title="Critical Gaps"
-          index="02 / Evidence against"
+          index="05 / Evidence against"
           items={report.critical_gaps}
           accent="bg-oxblood"
           delay={240}
@@ -264,7 +263,7 @@ export function ReportView({ report }: { report: ScreeningReport }) {
           <h3 className="font-display text-xl font-semibold tracking-tight">
             Suggested Interview Questions
           </h3>
-          <span className="label">03 / Probe the gaps</span>
+          <span className="label">06 / Probe the gaps</span>
         </header>
         <ol className="space-y-5">
           {report.target_interview_questions.map((question, i) => (

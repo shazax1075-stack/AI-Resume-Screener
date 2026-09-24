@@ -12,6 +12,14 @@ type Bucket = { count: number; resetAt: number };
 
 const buckets = new Map<string, Bucket>();
 
+/** Drops expired buckets so a stream of distinct keys can't grow the map forever. */
+function evictExpired(now: number): void {
+  if (buckets.size < 5_000) return;
+  for (const [key, bucket] of buckets) {
+    if (now >= bucket.resetAt) buckets.delete(key);
+  }
+}
+
 export type RateLimitResult = {
   allowed: boolean;
   remaining: number;
@@ -24,6 +32,7 @@ export function checkRateLimit(
   windowMs = 60 * 60 * 1000,
 ): RateLimitResult {
   const now = Date.now();
+  evictExpired(now);
   const bucket = buckets.get(key);
 
   if (!bucket || now >= bucket.resetAt) {
@@ -47,10 +56,24 @@ export function checkRateLimit(
   };
 }
 
-/** Best available client identifier behind Vercel's proxy. */
+/**
+ * Best available client identifier behind the platform's proxy.
+ *
+ * `x-forwarded-for` is attacker-controlled on hosts that append rather than
+ * overwrite it, and a spoofable key means no rate limit at all. Vercel's own
+ * `x-vercel-forwarded-for` is set by the platform, so it is preferred; the
+ * last hop of `x-forwarded-for` is used otherwise, since that is the one
+ * written by the proxy closest to us rather than by the client.
+ */
 export function clientKey(request: Request): string {
-  const forwarded = request.headers.get("x-forwarded-for");
-  return forwarded?.split(",")[0]?.trim() || "unknown";
+  const vercel = request.headers.get("x-vercel-forwarded-for")?.trim();
+  if (vercel) return vercel;
+
+  const real = request.headers.get("x-real-ip")?.trim();
+  if (real) return real;
+
+  const hops = request.headers.get("x-forwarded-for")?.split(",") ?? [];
+  return hops[hops.length - 1]?.trim() || "unknown";
 }
 
 /**
@@ -105,9 +128,4 @@ export function consumeDailyBudget(): DailyBudget {
 
   dailyCount += 1;
   return { allowed: true, used: dailyCount, limit };
-}
-
-/** Returns an unused screening to the budget when no model call was made. */
-export function refundDailyBudget(): void {
-  if (dailyCount > 0) dailyCount -= 1;
 }
