@@ -52,3 +52,62 @@ export function clientKey(request: Request): string {
   const forwarded = request.headers.get("x-forwarded-for");
   return forwarded?.split(",")[0]?.trim() || "unknown";
 }
+
+/**
+ * Global daily budget across all visitors.
+ *
+ * The per-visitor limit bounds one person; this bounds the bill. Like the
+ * limiter above it lives in memory, so each warm instance carries its own
+ * counter and the real ceiling is (limit x instances) -- a backstop against
+ * a link that gets passed around, not an accounting guarantee.
+ */
+
+const DEFAULT_DAILY_LIMIT = 100;
+
+let dailyCount = 0;
+let dailyResetAt = 0;
+
+function startOfNextUtcDay(now: number): number {
+  const date = new Date(now);
+  return Date.UTC(
+    date.getUTCFullYear(),
+    date.getUTCMonth(),
+    date.getUTCDate() + 1,
+    0,
+    0,
+    0,
+    0,
+  );
+}
+
+export function dailyLimit(): number {
+  const configured = Number(process.env.DAILY_SCREENING_LIMIT);
+  return Number.isFinite(configured) && configured > 0
+    ? Math.floor(configured)
+    : DEFAULT_DAILY_LIMIT;
+}
+
+export type DailyBudget = { allowed: boolean; used: number; limit: number };
+
+/** Counts one screening against today's budget, or reports it exhausted. */
+export function consumeDailyBudget(): DailyBudget {
+  const now = Date.now();
+  const limit = dailyLimit();
+
+  if (now >= dailyResetAt) {
+    dailyCount = 0;
+    dailyResetAt = startOfNextUtcDay(now);
+  }
+
+  if (dailyCount >= limit) {
+    return { allowed: false, used: dailyCount, limit };
+  }
+
+  dailyCount += 1;
+  return { allowed: true, used: dailyCount, limit };
+}
+
+/** Returns an unused screening to the budget when no model call was made. */
+export function refundDailyBudget(): void {
+  if (dailyCount > 0) dailyCount -= 1;
+}

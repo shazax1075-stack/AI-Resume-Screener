@@ -58,9 +58,12 @@ says so and asks for pasted text instead.
   the gateway doesn't guarantee determinism and `seed` isn't supported. A
   rubric-based score (grade each requirement, compute the percentage in code)
   would be the fix.
-- **The demo is rate limited** to 10 screenings per hour per IP, and inputs are
-  capped, because a public demo calls a paid API. The limiter is in-memory and
-  per-instance; a shared store (Vercel KV, Upstash) would make it exact.
+- **The demo is rate limited** to 10 screenings per hour per visitor, plus a
+  global daily budget (`DAILY_SCREENING_LIMIT`, default 100) so a link that
+  gets passed around can't run up the bill. Inputs are capped too. Both
+  limiters are in-memory and per-instance, which makes them a backstop rather
+  than an accounting guarantee; a shared store (Vercel KV, Upstash) would make
+  them exact.
 
 ## Running locally
 
@@ -75,6 +78,7 @@ npm run dev                  # http://localhost:3000
 | `OPENAI_API_KEY`  | Yes      | —                                      | Key for the gateway           |
 | `OPENAI_BASE_URL` | No       | `https://api.experientiallabs.ai/v1`   | Any OpenAI-compatible endpoint |
 | `OPENAI_MODEL`    | No       | `qwen3.8-27b`                          | Model slug to request         |
+| `DAILY_SCREENING_LIMIT` | No | `100`                                | Screenings per day, all visitors |
 
 ## Deploying to Vercel
 

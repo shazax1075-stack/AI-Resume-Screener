@@ -43,7 +43,7 @@ export default function Home() {
         <p className="label normal-case tracking-normal">
           Screening assistance only — every hiring decision stays with a person.
         </p>
-        <p className="label">Demo · 10 screenings per hour</p>
+        <p className="label">Demo · 10 per hour · capped daily</p>
       </footer>
     </main>
   );
