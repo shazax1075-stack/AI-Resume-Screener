@@ -1,6 +1,6 @@
 # Screening Desk — AI Resume Screener
 
-**[Live demo →](https://ai-resume-screener-cyan-one.vercel.app/)**
+**[Live demo →](https://resume-ai-screener.vercel.app/)**
 
 Link a job posting or paste the description, add a candidate resume, and get
 back a structured screening report: a match score, the evidence for and against
