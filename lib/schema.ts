@@ -26,7 +26,7 @@ export const requirementSchema = z
     requirement: z
       .string()
       .describe(
-        "One specific requirement from the job description, in under 12 words (e.g. '5+ years backend Python' or 'Kubernetes in production').",
+        "One specific requirement from the job description, in under 10 words (e.g. '5+ years backend Python' or 'Kubernetes in production').",
       ),
     importance: z
       .enum(REQUIREMENT_IMPORTANCES)
@@ -41,7 +41,7 @@ export const requirementSchema = z
     evidence: z
       .string()
       .describe(
-        "One short sentence citing the specific resume detail that justifies the status, or stating that the resume shows nothing on this point.",
+        "At most 20 words citing the resume detail that justifies the status, or stating that the resume does not address it.",
       ),
   })
   // Unknown keys are dropped rather than rejected: a stray field the model
@@ -58,22 +58,22 @@ export const modelReportSchema = z
       .min(1)
       .max(30)
       .describe(
-        "Every distinct requirement the job description states, each graded against the resume. Cover the whole job description; do not invent requirements it does not mention.",
+        "The requirements the job description states, each graded against the resume, most important first. Group near-duplicates and stop at 10; do not invent requirements the posting does not mention.",
       ),
     key_strengths: z
       .array(z.string())
       .describe(
-        "Concise bullet points highlighting the candidate's strongest qualifications that directly align with the job description.",
+        "At most 4 short bullet points on the candidate's strongest qualifications for this job.",
       ),
     critical_gaps: z
       .array(z.string())
       .describe(
-        "Concise bullet points identifying missing skills, experience, or qualifications the job description requires but the resume does not demonstrate.",
+        "At most 4 short bullet points on what the job requires and the resume does not evidence.",
       ),
     target_interview_questions: z
       .array(z.string())
       .describe(
-        "Tailored interview questions a recruiter should ask to probe the candidate's critical gaps and validate their claimed strengths.",
+        "At most 5 interview questions probing the gaps and testing the claimed strengths. One sentence each.",
       ),
   })
   .strip();

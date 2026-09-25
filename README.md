@@ -76,6 +76,21 @@ Job boards that render postings with JavaScript, or that block unfamiliar
 clients (LinkedIn and Indeed among them), can't be read this way. The app
 says so and asks for pasted text instead.
 
+### Why this model
+
+The first version ran on a larger model that took 60-80 seconds on this
+prompt. Vercel stops a serverless function at 60 seconds, so a perfectly good
+screening reached the user as the platform's raw timeout page. The checklist
+work made it worse, since the model now writes an evidence line per
+requirement.
+
+Three things fixed it: the prompt caps what gets written (ten requirements,
+20-word evidence, five questions), generation is capped by `max_tokens`, and
+the default model is now `deepseek-v4.1-flash` — about 9 seconds for gradings
+comparable to the slow model's. The analyzer also keeps its own 45-second
+deadline and skips the fallback attempt when too little time is left, so a
+slow gateway produces a written explanation rather than a platform error page.
+
 ### Notes from building it
 
 - **The gateway rejects `response_format` and `seed`.** Strict schema mode
@@ -105,7 +120,7 @@ npm test                     # unit tests (scoring, SSRF guards), no API key nee
 | ----------------------- | -------- | ------------------------------------ | -------------------------------- |
 | `OPENAI_API_KEY`        | Yes      | —                                    | Key for the gateway              |
 | `OPENAI_BASE_URL`       | No       | `https://api.experientiallabs.ai/v1` | Any OpenAI-compatible endpoint   |
-| `OPENAI_MODEL`          | No       | `qwen3.8-27b`                        | Model slug to request            |
+| `OPENAI_MODEL`          | No       | `deepseek-v4.1-flash`                | Model slug to request            |
 | `DAILY_SCREENING_LIMIT` | No       | `100`                                | Screenings per day, all visitors |
 
 ## Deploying to Vercel
