@@ -187,6 +187,16 @@ export type TailoringResult = Omit<Tailoring, "changes"> & {
   changes: (ResumeChange & { verify?: string[] })[];
   /** Rewrites dropped for claiming a skill the resume never showed. */
   rejected: { after: string; invented: string[] }[];
+  /** The resume with every applicable rewrite already in place. */
+  tailored_resume: string;
+  /** Rewrites whose original text couldn't be located, for manual editing. */
+  unapplied: number;
+  /** Estimated score once the rewrites are in place; see lib/scoring.ts. */
+  projection: {
+    score: number;
+    recommendation: HiringRecommendation;
+    upgraded: string[];
+  };
 };
 
 export const tailoringJsonSchema = z.toJSONSchema(tailoringSchema);

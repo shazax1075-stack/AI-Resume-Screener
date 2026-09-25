@@ -42,6 +42,8 @@ export function Screener() {
   const [mode, setMode] = useState<Mode>("recruiter");
   const [tailoring, setTailoring] = useState<TailoringResult | null>(null);
   const [tailoringInProgress, setTailoringInProgress] = useState(false);
+  const [verified, setVerified] = useState<ScreeningReport | null>(null);
+  const [verifying, setVerifying] = useState(false);
   const [dragging, setDragging] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
   const reportAnchor = useRef<HTMLDivElement>(null);
@@ -51,7 +53,7 @@ export function Screener() {
    * mid-request can't be undone by a late reply landing on top of it.
    */
   const generation = useRef(0);
-  const busy = analyzing || extracting || fetchingJob || tailoringInProgress;
+  const busy = analyzing || extracting || fetchingJob || tailoringInProgress || verifying;
 
   const ready = jobDescription.trim().length > 0 && resumeText.trim().length > 0;
 
@@ -77,6 +79,7 @@ export function Screener() {
       setJobSource(hostOf(jobUrl));
       setReport(null);
       setTailoring(null);
+      setVerified(null);
     } catch {
       if (ticket !== generation.current) return;
       setJobSource(null);
@@ -125,6 +128,7 @@ export function Screener() {
       setResumeText(data.text);
       setReport(null);
       setTailoring(null);
+      setVerified(null);
     } catch {
       if (ticket !== generation.current) return;
       setFileName(null);
@@ -156,6 +160,7 @@ export function Screener() {
     // The old report described a different candidate.
     setReport(null);
     setTailoring(null);
+    setVerified(null);
     setAnalyzing(false);
     setExtracting(false);
     setFetchingJob(false);
@@ -171,6 +176,7 @@ export function Screener() {
     setError(null);
     setReport(null);
     setTailoring(null);
+    setVerified(null);
     setAnalyzing(false);
     setExtracting(false);
     setFetchingJob(false);
@@ -182,6 +188,7 @@ export function Screener() {
     setError(null);
     setReport(null);
     setTailoring(null);
+    setVerified(null);
     setAnalyzing(true);
     try {
       const response = await fetch("/api/analyze", {
@@ -255,6 +262,45 @@ export function Screener() {
       });
     } finally {
       if (ticket === generation.current) setTailoringInProgress(false);
+    }
+  }
+
+  /** Re-screens the rewritten resume, so the projection can be checked. */
+  async function verifyTailoring() {
+    if (!tailoring || busy) return;
+    const ticket = generation.current;
+    setError(null);
+    setVerifying(true);
+    try {
+      const response = await fetch("/api/analyze", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          jobDescription,
+          resumeText: tailoring.tailored_resume,
+        }),
+      });
+      const data = (await response.json()) as {
+        report?: ScreeningReport;
+        error?: string;
+      };
+      if (ticket !== generation.current) return;
+      if (!response.ok || !data.report) {
+        setError({
+          label: "Re-screening failed",
+          message: data.error ?? "The re-screening failed. Please try again.",
+        });
+        return;
+      }
+      setVerified(data.report);
+    } catch {
+      if (ticket !== generation.current) return;
+      setError({
+        label: "Re-screening failed",
+        message: "Could not reach the server. Check your connection and try again.",
+      });
+    } finally {
+      if (ticket === generation.current) setVerifying(false);
     }
   }
 
@@ -456,7 +502,9 @@ export function Screener() {
       </div>
 
       <p className="sr-only" role="status" aria-live="polite">
-        {tailoringInProgress
+        {verifying
+          ? "Re-screening your rewritten resume"
+          : tailoringInProgress
           ? "Rewriting your resume"
           : analyzing
           ? "Screening in progress"
@@ -518,7 +566,15 @@ export function Screener() {
           </div>
         )}
 
-        {tailoring && <TailoringView tailoring={tailoring} />}
+        {tailoring && report && (
+          <TailoringView
+            tailoring={tailoring}
+            currentScore={report.match_percentage}
+            verified={verified}
+            verifying={verifying}
+            onVerify={() => void verifyTailoring()}
+          />
+        )}
       </div>
     </>
   );

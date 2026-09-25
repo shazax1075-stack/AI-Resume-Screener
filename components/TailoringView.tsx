@@ -1,4 +1,8 @@
-import type { TailoringResult } from "@/lib/schema";
+"use client";
+
+import { useState } from "react";
+
+import type { ScreeningReport, TailoringResult } from "@/lib/schema";
 
 /**
  * The candidate-facing half of the report: what to rewrite, and what no
@@ -6,7 +10,76 @@ import type { TailoringResult } from "@/lib/schema";
  * answer to "this posting needs Kubernetes and you have none" is not a
  * cleverer sentence.
  */
-export function TailoringView({ tailoring }: { tailoring: TailoringResult }) {
+function toneFor(delta: number): string {
+  if (delta > 0) return "text-sage";
+  if (delta < 0) return "text-oxblood";
+  return "text-ink-soft";
+}
+
+export function TailoringView({
+  tailoring,
+  currentScore,
+  verified,
+  verifying,
+  onVerify,
+}: {
+  tailoring: TailoringResult;
+  currentScore: number;
+  verified: ScreeningReport | null;
+  verifying: boolean;
+  onVerify: () => void;
+}) {
+  const [copied, setCopied] = useState(false);
+  const [downloading, setDownloading] = useState(false);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
+
+  const projected = verified?.match_percentage ?? tailoring.projection.score;
+  const delta = projected - currentScore;
+  const measured = verified !== null;
+
+  async function copyResume() {
+    try {
+      await navigator.clipboard.writeText(tailoring.tailored_resume);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2500);
+    } catch {
+      setDownloadError("Your browser blocked copying. Download the file instead.");
+    }
+  }
+
+  async function downloadDocx() {
+    setDownloading(true);
+    setDownloadError(null);
+    try {
+      const response = await fetch("/api/resume-docx", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ resumeText: tailoring.tailored_resume }),
+      });
+      if (!response.ok) {
+        const data = (await response.json().catch(() => ({}))) as { error?: string };
+        setDownloadError(data.error ?? "Couldn't build the document.");
+        return;
+      }
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download =
+        response.headers
+          .get("Content-Disposition")
+          ?.match(/filename="([^"]+)"/)?.[1] ?? "resume-tailored.docx";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    } catch {
+      setDownloadError("Couldn't reach the server. Copy the text instead.");
+    } finally {
+      setDownloading(false);
+    }
+  }
+
   return (
     <div className="mt-16 sm:mt-20">
       <div className="animate-rise flex items-baseline justify-between gap-6 border-b border-ink/25 pb-3">
@@ -20,8 +93,102 @@ export function TailoringView({ tailoring }: { tailoring: TailoringResult }) {
         {tailoring.summary}
       </p>
 
+      {/* What the rewrite is worth, and the finished document. */}
+      <div
+        className="animate-rise mt-8 grid gap-8 border border-rule bg-[#fffdf8]/60 p-6 sm:grid-cols-[auto_1fr] sm:gap-12 sm:p-7"
+        style={{ animationDelay: "40ms" }}
+      >
+        <div>
+          <span className="label block">
+            {measured ? "Re-screened score" : "Best case"}
+          </span>
+          <div className="mt-2 flex items-baseline gap-4">
+            <span className="font-display text-3xl font-semibold tabular-nums text-ink-faint line-through decoration-ink-faint/40">
+              {currentScore}%
+            </span>
+            <span
+              className={`font-display text-[3.5rem] leading-none font-semibold tracking-tighter tabular-nums ${toneFor(delta)}`}
+            >
+              {projected}%
+            </span>
+            <span className={`font-mono text-sm ${toneFor(delta)}`}>
+              {delta > 0 ? `+${delta}` : delta}
+            </span>
+          </div>
+          <p className="mt-3 max-w-sm text-sm leading-relaxed text-ink-soft">
+            {measured ? (
+              <>
+                Measured by screening the rewritten resume from scratch. Scores move
+                several points between runs, so treat a small change as noise.
+              </>
+            ) : (
+              <>
+                The ceiling, not a forecast:{" "}
+                {tailoring.projection.upgraded.length > 0 ? (
+                  <>
+                    what you&rsquo;d score if every one of the{" "}
+                    {tailoring.projection.upgraded.length} requirement
+                    {tailoring.projection.upgraded.length === 1 ? "" : "s"} you partly
+                    evidence were read as fully met.
+                  </>
+                ) : (
+                  <>what you&rsquo;d score if every rewrite landed perfectly.</>
+                )}{" "}
+                Screening grades what a resume says more than how it says it, so a
+                re-screen usually lands lower.
+              </>
+            )}
+          </p>
+          {!measured && (
+            <button
+              type="button"
+              onClick={onVerify}
+              disabled={verifying}
+              className="mt-4 cursor-pointer border border-ink/25 px-4 py-2 font-mono text-[0.6875rem] tracking-[0.14em] uppercase transition-colors hover:border-ink hover:bg-ink hover:text-paper disabled:cursor-not-allowed disabled:border-rule disabled:text-ink-faint disabled:hover:bg-transparent disabled:hover:text-ink-faint"
+            >
+              {verifying ? "Re-screening…" : "Verify by re-screening"}
+            </button>
+          )}
+        </div>
+
+        <div className="border-t border-rule pt-6 sm:border-t-0 sm:border-l sm:pt-0 sm:pl-12">
+          <span className="label block">Your tailored resume</span>
+          <p className="mt-3 max-w-sm text-sm leading-relaxed text-ink-soft">
+            Every rewrite below, already applied to your resume. Formatting is plain,
+            so restyle it in Word before sending.
+          </p>
+          <div className="mt-4 flex flex-wrap gap-3">
+            <button
+              type="button"
+              onClick={() => void downloadDocx()}
+              disabled={downloading}
+              className="cursor-pointer bg-ink px-5 py-2.5 font-display text-base font-semibold tracking-tight text-paper transition-colors hover:bg-oxblood disabled:cursor-not-allowed disabled:bg-ink/25"
+            >
+              {downloading ? "Building…" : "Download .docx"}
+            </button>
+            <button
+              type="button"
+              onClick={() => void copyResume()}
+              className="cursor-pointer border border-ink/25 px-4 py-2.5 font-mono text-[0.6875rem] tracking-[0.14em] uppercase transition-colors hover:border-ink hover:bg-ink hover:text-paper"
+            >
+              {copied ? "Copied" : "Copy text"}
+            </button>
+          </div>
+          {tailoring.unapplied > 0 && (
+            <p className="mt-3 text-sm leading-relaxed text-ink-soft">
+              {tailoring.unapplied} rewrite{tailoring.unapplied === 1 ? "" : "s"} below
+              couldn&rsquo;t be matched to a line in your text, so {tailoring.unapplied === 1 ? "it isn't" : "they aren't"} in
+              the file — apply {tailoring.unapplied === 1 ? "it" : "them"} by hand.
+            </p>
+          )}
+          {downloadError && (
+            <p className="mt-3 text-sm leading-relaxed text-oxblood">{downloadError}</p>
+          )}
+        </div>
+      </div>
+
       <section
-        className="animate-rise mt-8 border border-rule bg-[#fffdf8]/60 p-6 sm:p-7"
+        className="animate-rise mt-6 border border-rule bg-[#fffdf8]/60 p-6 sm:p-7"
         style={{ animationDelay: "80ms" }}
       >
         <header className="mb-2 flex items-baseline justify-between gap-4 border-b border-rule pb-3">

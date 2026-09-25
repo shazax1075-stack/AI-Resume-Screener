@@ -1,6 +1,8 @@
+import { applyChanges } from "@/lib/applyChanges";
 import { rejectFabrications } from "@/lib/fabrication";
 import { ModelError, requestJson } from "@/lib/gateway";
 import { MAX_INPUT_CHARS } from "@/lib/limits";
+import { bestCaseScore } from "@/lib/scoring";
 import {
   tailoringJsonSchema,
   tailoringSchema,
@@ -153,5 +155,21 @@ export async function tailorResume(
     );
   }
 
-  return { ...cleaned, changes: screened.changes, rejected: screened.rejected };
+  // Rebuild the resume here rather than in the browser: the same text feeds
+  // the download, the copy button and the optional re-screening, and all
+  // three must be the identical document.
+  const rebuilt = applyChanges(resumeText, screened.changes);
+  const projection = bestCaseScore(
+    requirements,
+    rebuilt.applied.map((change) => change.requirement),
+  );
+
+  return {
+    ...cleaned,
+    changes: screened.changes,
+    rejected: screened.rejected,
+    tailored_resume: rebuilt.text,
+    unapplied: rebuilt.unmatched.length,
+    projection,
+  };
 }

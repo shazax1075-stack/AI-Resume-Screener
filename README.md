@@ -47,10 +47,35 @@ so the API key never reaches the browser.
    checklist from the screening — so it costs one model call, not two — and
    returns line-by-line rewrites with the requirement each one serves, plus
    the gaps no rewrite can cover.
-6. **Validate before rendering.** The response is parsed against a
+6. **Hand back a document.** The rewrites are applied to the resume text,
+   matched loosely enough to survive reflowed whitespace and smart quotes,
+   and `POST /api/resume-docx` returns a plain, ATS-legible `.docx`. Anything
+   that couldn't be matched is reported rather than silently skipped.
+7. **Validate before rendering.** The response is parsed against a
    [zod](https://zod.dev) schema. The same schema is embedded in the prompt as
    JSON Schema, so what the model is asked for and what the UI accepts can't
    drift apart. A failed response is reported, never half-rendered.
+
+![The tailoring view: a best-case score beside the current one, a download
+button, line-by-line rewrites with the requirement each serves, and a list of
+requirements no rewrite can cover.](docs/tailoring.png)
+
+### What measuring the rewrite showed
+
+The obvious version of "how much would this help?" is a projection, and the
+obvious projection lies. Assuming every requirement a rewrite addresses would
+read as fully met put the sample resume at 79-84%, up from 65%.
+
+Re-screening the rewritten resume put it at 64-66%, against an original that
+scored 52%, 65% and 71% across runs. So the rewrite makes the score *stable*
+rather than higher, and the screening model's own variance is larger than any
+gain from presentation. That is the honest finding: this model grades what a
+resume says far more than how well it says it.
+
+So the number is labelled a ceiling, not a forecast, the interface says a
+re-screen usually lands lower, and one is a click away. The same measurement
+is why the re-screened figure carries a warning that small differences are
+noise.
 
 ### Refusing to lie for the user
 
@@ -169,6 +194,7 @@ app/
   api/extract/route.ts    File → text endpoint
   api/fetch-job/route.ts  Job posting URL → text endpoint
   api/tailor/route.ts     Checklist → honest resume rewrites
+  api/resume-docx/route.ts  Rebuilt resume → downloadable .docx
 components/
   Screener.tsx            Input form, upload, loading and error states
   ReportView.tsx          The rendered report and requirement checklist
@@ -178,7 +204,9 @@ lib/
   analyzer.ts             Screening prompt and validation
   tailor.ts               Rewriting prompt and validation
   fabrication.ts          Drops rewrites that invent experience
-  scoring.ts              Gradings → score and recommendation
+  applyChanges.ts         Puts accepted rewrites back into the resume
+  resumeDocx.ts           Renders the rebuilt resume as a Word file
+  scoring.ts              Gradings → score, recommendation, best case
   schema.ts               Report contract (zod → JSON Schema)
   resumeParser.ts         PDF / DOCX / TXT extraction
   jobFetcher.ts           Job posting URL → text, with SSRF guards
@@ -216,3 +244,9 @@ streamlit run app.py
 - Scanned, image-only PDFs have no text layer and can't be read.
 - Job posting links work for server-rendered pages. Postings behind a login,
   or rendered entirely in the browser, need to be pasted.
+- The app only ever holds the plain text extracted from an uploaded resume, so
+  the downloaded `.docx` cannot preserve the original layout, fonts or
+  columns. It is meant to be restyled, or pasted into the candidate's own
+  file.
+- The rewrite improves how evidence reads, not what it says. See the
+  measurement above for how little that moves a score.
