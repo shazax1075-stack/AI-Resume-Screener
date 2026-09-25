@@ -186,7 +186,21 @@ function RequirementsTable({
   );
 }
 
-export function ReportView({ report }: { report: ScreeningReport }) {
+/** A verdict written about you reads differently from one written about a stranger. */
+const CANDIDATE_VERDICT: Record<HiringRecommendation, string> = {
+  "Strong Pass": "Strong match",
+  "Proceed to Interview": "Interview-ready",
+  Hold: "Borderline",
+  Reject: "Not there yet",
+};
+
+export function ReportView({
+  report,
+  mode = "recruiter",
+}: {
+  report: ScreeningReport;
+  mode?: "recruiter" | "candidate";
+}) {
   const recommendation = RECOMMENDATION_STYLE[report.hiring_recommendation];
   const tone = VERDICT_TONE[report.hiring_recommendation];
 
@@ -222,13 +236,17 @@ export function ReportView({ report }: { report: ScreeningReport }) {
 
         <div className="flex flex-col justify-end gap-6">
           <div>
-            <span className="label block">Recommendation</span>
+            <span className="label block">
+              {mode === "candidate" ? "How a recruiter reads this" : "Recommendation"}
+            </span>
             <div
               className={`mt-3 inline-flex items-center gap-2.5 border px-4 py-2 ${recommendation.border} ${recommendation.text}`}
             >
               <span aria-hidden className={`h-1.5 w-1.5 rounded-full ${recommendation.dot}`} />
               <span className="font-display text-lg font-semibold tracking-tight">
-                {report.hiring_recommendation}
+                {mode === "candidate"
+                  ? CANDIDATE_VERDICT[report.hiring_recommendation]
+                  : report.hiring_recommendation}
               </span>
             </div>
           </div>
@@ -247,7 +265,7 @@ export function ReportView({ report }: { report: ScreeningReport }) {
           delay={160}
         />
         <BulletPanel
-          title="Critical Gaps"
+          title={mode === "candidate" ? "Where You Fall Short" : "Critical Gaps"}
           index="05 / Evidence against"
           items={report.critical_gaps}
           accent="bg-oxblood"
@@ -261,7 +279,9 @@ export function ReportView({ report }: { report: ScreeningReport }) {
       >
         <header className="mb-5 flex items-baseline justify-between gap-4 border-b border-rule pb-3">
           <h3 className="font-display text-xl font-semibold tracking-tight">
-            Suggested Interview Questions
+            {mode === "candidate"
+              ? "Questions To Expect"
+              : "Suggested Interview Questions"}
           </h3>
           <span className="label">06 / Probe the gaps</span>
         </header>

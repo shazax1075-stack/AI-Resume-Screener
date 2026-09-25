@@ -100,3 +100,93 @@ export type ScreeningReport = ModelReport & {
 
 /** JSON schema handed to the model inside the prompt. */
 export const modelReportJsonSchema = z.toJSONSchema(modelReportSchema);
+
+/**
+ * Resume tailoring: the second half of the app, for the candidate rather
+ * than the recruiter.
+ *
+ * The model may only reframe what the resume already says. Anything it
+ * cannot honestly say is a gap, not a rewrite -- see `lib/fabrication.ts`,
+ * which enforces that in code rather than trusting the instruction.
+ */
+
+export const resumeChangeSchema = z
+  .object({
+    section: z
+      .string()
+      .describe(
+        "Where in the resume this change applies, e.g. 'Summary', 'Skills', or 'Loopline, second bullet'.",
+      ),
+    before: z
+      .string()
+      .describe(
+        "The original text, copied verbatim from the resume. Never paraphrased.",
+      ),
+    after: z
+      .string()
+      .describe(
+        "The rewritten text. Uses only facts, tools, employers, titles, dates and numbers that already appear in the resume.",
+      ),
+    reason: z
+      .string()
+      .describe(
+        "One sentence, under 25 words, on why this helps for this posting.",
+      ),
+    requirement: z
+      .string()
+      .describe("The job requirement this change serves, copied from the checklist."),
+  })
+  .strip();
+
+export const resumeGapSchema = z
+  .object({
+    requirement: z
+      .string()
+      .describe("The requirement the resume cannot evidence, from the checklist."),
+    why_it_matters: z
+      .string()
+      .describe("One short sentence on how much weight the posting puts on it."),
+    how_to_close: z
+      .string()
+      .describe(
+        "One concrete sentence on what would evidence it — a project, a certification, or experience to surface if the candidate has it elsewhere.",
+      ),
+  })
+  .strip();
+
+export const tailoringSchema = z
+  .object({
+    changes: z
+      .array(resumeChangeSchema)
+      .min(1)
+      .max(12)
+      .describe(
+        "The rewrites worth making, most valuable first. At most 8; quality over volume.",
+      ),
+    gaps: z
+      .array(resumeGapSchema)
+      .max(8)
+      .describe(
+        "Requirements no rewrite can honestly cover, because the resume shows no evidence of them.",
+      ),
+    summary: z
+      .string()
+      .describe(
+        "Two sentences at most: what this resume is getting wrong for this posting, and what the rewrite fixes.",
+      ),
+  })
+  .strip();
+
+export type ResumeChange = z.infer<typeof resumeChangeSchema>;
+export type ResumeGap = z.infer<typeof resumeGapSchema>;
+export type Tailoring = z.infer<typeof tailoringSchema>;
+
+/** What the API returns: the model's rewrites after the fabrication check. */
+export type TailoringResult = Omit<Tailoring, "changes"> & {
+  /** Kept rewrites; `verify` lists numbers the candidate should confirm. */
+  changes: (ResumeChange & { verify?: string[] })[];
+  /** Rewrites dropped for claiming a skill the resume never showed. */
+  rejected: { after: string; invented: string[] }[];
+};
+
+export const tailoringJsonSchema = z.toJSONSchema(tailoringSchema);

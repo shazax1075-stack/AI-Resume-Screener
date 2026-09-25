@@ -1,20 +1,21 @@
 import { NextResponse } from "next/server";
 
-import { analyzeResume } from "@/lib/analyzer";
 import { ModelError } from "@/lib/gateway";
 import { MAX_INPUT_CHARS } from "@/lib/limits";
 import { checkRateLimit, clientKey, consumeDailyBudget } from "@/lib/rateLimit";
+import { requirementSchema } from "@/lib/schema";
+import { tailorResume } from "@/lib/tailor";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
 export async function POST(request: Request) {
-  const limit = checkRateLimit(`analyze:${clientKey(request)}`);
+  const limit = checkRateLimit(`tailor:${clientKey(request)}`);
   if (!limit.allowed) {
     const minutes = Math.max(1, Math.ceil(limit.retryAfterSeconds / 60));
     return NextResponse.json(
       {
-        error: `This demo allows 10 screenings per hour. Try again in about ${
+        error: `This demo allows 10 rewrites per hour. Try again in about ${
           minutes === 1 ? "a minute" : `${minutes} minutes`
         }.`,
       },
@@ -22,7 +23,7 @@ export async function POST(request: Request) {
     );
   }
 
-  let body: { jobDescription?: unknown; resumeText?: unknown };
+  let body: { jobDescription?: unknown; resumeText?: unknown; requirements?: unknown };
   try {
     body = await request.json();
   } catch {
@@ -33,12 +34,6 @@ export async function POST(request: Request) {
   if (typeof jobDescription !== "string" || typeof resumeText !== "string") {
     return NextResponse.json(
       { error: "Provide both a job description and a resume." },
-      { status: 400 },
-    );
-  }
-  if (!jobDescription.trim() || !resumeText.trim()) {
-    return NextResponse.json(
-      { error: "Both the job description and the resume need text in them." },
       { status: 400 },
     );
   }
@@ -54,36 +49,40 @@ export async function POST(request: Request) {
     );
   }
 
-  // Charged only once the request is known to be worth a model call, so
-  // malformed or oversized input can't spend the demo's daily budget.
+  // The checklist comes from the screening the client already ran, so
+  // tailoring costs one model call rather than two.
+  const requirements = requirementSchema.array().min(1).max(30).safeParse(body.requirements);
+  if (!requirements.success) {
+    return NextResponse.json(
+      { error: "Screen the resume first, then tailor it." },
+      { status: 400 },
+    );
+  }
+
   const budget = consumeDailyBudget();
   if (!budget.allowed) {
     return NextResponse.json(
       {
-        error: `This demo has used its ${budget.limit} screening${
-          budget.limit === 1 ? "" : "s"
-        } for today — it runs on a personal API key. It resets at midnight UTC, or clone the repo and run it with your own key.`,
+        error: `This demo has used its ${budget.limit} runs for today — it runs on a personal API key. It resets at midnight UTC, or clone the repo and run it with your own key.`,
       },
       { status: 429 },
     );
   }
 
   try {
-    const report = await analyzeResume(resumeText, jobDescription);
-    return NextResponse.json({ report });
+    const tailoring = await tailorResume(resumeText, jobDescription, requirements.data);
+    return NextResponse.json({ tailoring });
   } catch (error) {
     if (error instanceof ModelError) {
-      // The detail is for the server log; the visitor sees error.message.
-      if (error.detail) console.error("Analysis failed:", error.detail);
-      // An upstream fault isn't the caller's bad request.
+      if (error.detail) console.error("Tailoring failed:", error.detail);
       return NextResponse.json(
         { error: error.message },
         { status: error.upstream ? 502 : 400 },
       );
     }
-    console.error("Unexpected analysis failure", error);
+    console.error("Unexpected tailoring failure", error);
     return NextResponse.json(
-      { error: "Something went wrong while analyzing. Please try again." },
+      { error: "Something went wrong while rewriting. Please try again." },
       { status: 500 },
     );
   }

@@ -7,9 +7,15 @@ requirement checklist grading each requirement met, partial or missing with the
 resume evidence behind it, then strengths, gaps and suggested interview
 questions.](docs/report.png)
 
-Link a job posting or paste the description, add a candidate resume, and get
-back a structured screening report: a match score, the evidence for and against
-the candidate, and interview questions aimed at the gaps.
+Link a job posting or paste the description, add a resume, and get back a
+structured screening report: a match score derived from a requirement
+checklist, the evidence for and against, and interview questions aimed at the
+gaps.
+
+It reads two ways. **Hiring** gives you the recruiter's verdict. **Applying**
+gives the candidate the same checklist plus a tailored rewrite of their own
+resume — one that reframes what the resume already says and refuses to invent
+what it doesn't.
 
 Built with Next.js (App Router), TypeScript and Tailwind, deployed on Vercel.
 The model runs behind an OpenAI-compatible gateway, called only from the server
@@ -37,10 +43,32 @@ so the API key never reaches the browser.
    earn full / half / no credit. The verdict follows the score, with a floor
    for missing must-haves — two unmet requirements cap a candidate at Hold
    however many nice-to-haves they have.
-5. **Validate before rendering.** The response is parsed against a
+5. **Tailor it, honestly.** In candidate mode, `POST /api/tailor` takes the
+   checklist from the screening — so it costs one model call, not two — and
+   returns line-by-line rewrites with the requirement each one serves, plus
+   the gaps no rewrite can cover.
+6. **Validate before rendering.** The response is parsed against a
    [zod](https://zod.dev) schema. The same schema is embedded in the prompt as
    JSON Schema, so what the model is asked for and what the UI accepts can't
    drift apart. A failed response is reported, never half-rendered.
+
+### Refusing to lie for the user
+
+A resume rewriter has an obvious failure mode: the quickest way to raise a
+match score is to claim the missing skill. That gets the candidate caught in
+the first technical screen, so the rule is that a rewrite may reframe what the
+resume says and never add to it.
+
+The prompt says so at length, but a prompt is advice.
+[`lib/fabrication.ts`](lib/fabrication.ts) enforces it: every rewrite is
+checked against the original resume, and anything introducing a term from a
+requirement the screening graded `missing` is dropped before the candidate
+ever sees it. The report says how many were withheld and why.
+
+Numbers are handled separately. A resume dated "2018–present" supports "7
+years" without stating it, so an unsourced figure is kept but flagged — "your
+resume doesn't state this anywhere; keep it only if it's accurate" — because
+the candidate is the one who knows. Both behaviours have tests.
 
 ### Why the score isn't generated
 
@@ -140,11 +168,16 @@ app/
   api/analyze/route.ts    Screening endpoint (server-only, holds the key)
   api/extract/route.ts    File → text endpoint
   api/fetch-job/route.ts  Job posting URL → text endpoint
+  api/tailor/route.ts     Checklist → honest resume rewrites
 components/
   Screener.tsx            Input form, upload, loading and error states
   ReportView.tsx          The rendered report and requirement checklist
+  TailoringView.tsx       Rewrites, what to verify, and what can't be fixed
 lib/
-  analyzer.ts             Prompt, model call, fallback, validation
+  gateway.ts              Shared model client: JSON mode, retries, budgets
+  analyzer.ts             Screening prompt and validation
+  tailor.ts               Rewriting prompt and validation
+  fabrication.ts          Drops rewrites that invent experience
   scoring.ts              Gradings → score and recommendation
   schema.ts               Report contract (zod → JSON Schema)
   resumeParser.ts         PDF / DOCX / TXT extraction

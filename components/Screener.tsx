@@ -3,8 +3,14 @@
 import { useRef, useState, type DragEvent } from "react";
 
 import { ReportView } from "@/components/ReportView";
+import { TailoringView } from "@/components/TailoringView";
 import { SAMPLE_JOB_DESCRIPTION, SAMPLE_RESUME } from "@/lib/sample";
-import type { ScreeningReport } from "@/lib/schema";
+import type { ScreeningReport, TailoringResult } from "@/lib/schema";
+
+type Mode = "recruiter" | "candidate";
+
+/** Below this, tailoring is the obvious next step rather than a quiet option. */
+const TAILOR_PROMINENT_BELOW = 75;
 
 const ACCEPTED_EXTENSIONS = ["txt", "pdf", "docx"];
 const ACCEPTED = ACCEPTED_EXTENSIONS.map((ext) => `.${ext}`).join(",");
@@ -33,6 +39,9 @@ export function Screener() {
   const [analyzing, setAnalyzing] = useState(false);
   const [error, setError] = useState<{ label: string; message: string } | null>(null);
   const [report, setReport] = useState<ScreeningReport | null>(null);
+  const [mode, setMode] = useState<Mode>("recruiter");
+  const [tailoring, setTailoring] = useState<TailoringResult | null>(null);
+  const [tailoringInProgress, setTailoringInProgress] = useState(false);
   const [dragging, setDragging] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
   const reportAnchor = useRef<HTMLDivElement>(null);
@@ -42,7 +51,7 @@ export function Screener() {
    * mid-request can't be undone by a late reply landing on top of it.
    */
   const generation = useRef(0);
-  const busy = analyzing || extracting || fetchingJob;
+  const busy = analyzing || extracting || fetchingJob || tailoringInProgress;
 
   const ready = jobDescription.trim().length > 0 && resumeText.trim().length > 0;
 
@@ -67,6 +76,7 @@ export function Screener() {
       setJobDescription(data.text);
       setJobSource(hostOf(jobUrl));
       setReport(null);
+      setTailoring(null);
     } catch {
       if (ticket !== generation.current) return;
       setJobSource(null);
@@ -114,6 +124,7 @@ export function Screener() {
       }
       setResumeText(data.text);
       setReport(null);
+      setTailoring(null);
     } catch {
       if (ticket !== generation.current) return;
       setFileName(null);
@@ -144,6 +155,7 @@ export function Screener() {
     setError(null);
     // The old report described a different candidate.
     setReport(null);
+    setTailoring(null);
     setAnalyzing(false);
     setExtracting(false);
     setFetchingJob(false);
@@ -158,15 +170,18 @@ export function Screener() {
     setJobSource(null);
     setError(null);
     setReport(null);
+    setTailoring(null);
     setAnalyzing(false);
     setExtracting(false);
     setFetchingJob(false);
+    setTailoringInProgress(false);
   }
 
   async function analyze() {
     const ticket = generation.current;
     setError(null);
     setReport(null);
+    setTailoring(null);
     setAnalyzing(true);
     try {
       const response = await fetch("/api/analyze", {
@@ -203,8 +218,72 @@ export function Screener() {
     }
   }
 
+  async function tailor() {
+    if (!report || busy) return;
+    const ticket = generation.current;
+    setError(null);
+    setTailoringInProgress(true);
+    try {
+      const response = await fetch("/api/tailor", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        // The checklist from the screening, so this costs one model call.
+        body: JSON.stringify({
+          jobDescription,
+          resumeText,
+          requirements: report.requirements,
+        }),
+      });
+      const data = (await response.json()) as {
+        tailoring?: TailoringResult;
+        error?: string;
+      };
+      if (ticket !== generation.current) return;
+      if (!response.ok || !data.tailoring) {
+        setError({
+          label: "Rewrite failed",
+          message: data.error ?? "The rewrite failed. Please try again.",
+        });
+        return;
+      }
+      setTailoring(data.tailoring);
+    } catch {
+      if (ticket !== generation.current) return;
+      setError({
+        label: "Rewrite failed",
+        message: "Could not reach the server. Check your connection and try again.",
+      });
+    } finally {
+      if (ticket === generation.current) setTailoringInProgress(false);
+    }
+  }
+
   return (
     <>
+      {/* Same screening, two readings of it. */}
+      <div className="mb-10 flex items-center gap-1 border-b border-rule pb-3">
+        {(["recruiter", "candidate"] as const).map((option) => (
+          <button
+            key={option}
+            type="button"
+            onClick={() => setMode(option)}
+            aria-pressed={mode === option}
+            className={`cursor-pointer px-4 py-2 font-mono text-[0.6875rem] tracking-[0.14em] uppercase transition-colors ${
+              mode === option
+                ? "bg-ink text-paper"
+                : "text-ink-faint hover:text-ink"
+            }`}
+          >
+            {option === "recruiter" ? "I'm hiring" : "I'm applying"}
+          </button>
+        ))}
+        <p className="ml-3 text-sm text-ink-faint">
+          {mode === "recruiter"
+            ? "Screen a candidate against a posting."
+            : "See how your resume reads, and how to sharpen it."}
+        </p>
+      </div>
+
       <div className="grid gap-8 lg:grid-cols-2 lg:gap-10">
         {/* Job description */}
         <div>
@@ -266,7 +345,7 @@ export function Screener() {
         <div>
           <div className="mb-3 flex items-baseline justify-between gap-4 border-b border-rule pb-2">
             <label htmlFor="resume" className="label">
-              02 / Candidate resume
+              02 / {mode === "recruiter" ? "Candidate resume" : "Your resume"}
             </label>
             <span className="label tabular-nums">
               {resumeText.length ? `${resumeText.length} chars` : ""}
@@ -344,7 +423,11 @@ export function Screener() {
           disabled={!ready || busy}
           className="group relative cursor-pointer bg-ink px-8 py-3.5 font-display text-lg font-semibold tracking-tight text-paper transition-all hover:bg-oxblood disabled:cursor-not-allowed disabled:bg-ink/25"
         >
-          {analyzing ? "Screening…" : "Screen candidate"}
+          {analyzing
+            ? "Screening…"
+            : mode === "recruiter"
+              ? "Screen candidate"
+              : "Score my resume"}
         </button>
 
         <button
@@ -373,7 +456,9 @@ export function Screener() {
       </div>
 
       <p className="sr-only" role="status" aria-live="polite">
-        {analyzing
+        {tailoringInProgress
+          ? "Rewriting your resume"
+          : analyzing
           ? "Screening in progress"
           : extracting
             ? "Reading the uploaded file"
@@ -409,7 +494,31 @@ export function Screener() {
       )}
 
       <div ref={reportAnchor} tabIndex={-1} className="scroll-mt-10 outline-none">
-        {report && <ReportView report={report} />}
+        {report && <ReportView report={report} mode={mode} />}
+
+        {report && mode === "candidate" && !tailoring && (
+          <div className="rule-top mt-12 flex flex-wrap items-center gap-x-6 gap-y-3 pt-6">
+            <button
+              type="button"
+              onClick={() => void tailor()}
+              disabled={busy}
+              className={`cursor-pointer px-7 py-3 font-display text-lg font-semibold tracking-tight transition-all disabled:cursor-not-allowed disabled:bg-ink/25 ${
+                report.match_percentage < TAILOR_PROMINENT_BELOW
+                  ? "bg-ink text-paper hover:bg-oxblood"
+                  : "border border-ink/30 text-ink hover:border-ink hover:bg-ink hover:text-paper"
+              }`}
+            >
+              {tailoringInProgress ? "Rewriting…" : "Tailor my resume"}
+            </button>
+            <p className="max-w-md text-sm leading-relaxed text-ink-soft">
+              {report.match_percentage < TAILOR_PROMINENT_BELOW
+                ? "Your resume is under the line for this posting. This rewrites your own lines to surface what's already there — it never invents experience."
+                : "Already a strong match. A rewrite can still sharpen how the evidence reads."}
+            </p>
+          </div>
+        )}
+
+        {tailoring && <TailoringView tailoring={tailoring} />}
       </div>
     </>
   );
